@@ -31,4 +31,16 @@ namespace Prismatix
             return image;
         }
     }
+
+    public class Raycast
+    {
+        public Vector3 origin;
+        public Vector3 direction;
+
+
+        public Vector3 getPoint(t)
+        {
+            return origin + direction * t;
+        }
+    }
 }
