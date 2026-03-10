@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Prismatix")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+107099c26cee6989510974e25f7f2222a5760efd")]
 [assembly: System.Reflection.AssemblyProductAttribute("Prismatix")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Prismatix")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,13 +1,25 @@
-﻿using Prismatix.Math;
+﻿using Prismatix;
+using Prismatix.Math;
 using System;
 using System.IO;
+using System.Collections.Generic;
 
 namespace Prismatix.Geometry
 {
+    public class Scene
+    {
+        public List<Object> objects = new List<Object>();
+        public Camera mainCamera;
+
+        public void AddObject(Object obj){
+            objects.Add(obj);
+        }
+    }
+
     public class Mesh
     {
-        public List<Vector3> vertices = new(); //hold all sequential vertex positions
-        public List<int> indices = new(); //list of index numbers referring to vertices
+        public List<Vector3> vertices = new List<Vector3>(); //hold all sequential vertex positions
+        public List<int> indices = new List<int>(); //list of index numbers referring to vertices
         //each 3 ints represents a tri
 
 
@@ -35,6 +47,11 @@ namespace Prismatix.Geometry
         public Vector3 position;
         public float scale;
 
+        public Object(string nam, Vector3 pos, float scl)
+        {
+            name = nam; position = pos; scale = scl;
+        }
+
         public void LoadFromDisk(string filePath)
         {
             mesh = new Mesh();
@@ -42,30 +59,38 @@ namespace Prismatix.Geometry
             string[] data = File.ReadAllLines(filePath);
             foreach (string line in data)
             {
-                if (line.StartsWith("o")) { name = line.Substring(2); }
+                string cleanLine = line.Split('#')[0].Trim(); //clean up comments and whitespace
+                if (string.IsNullOrWhiteSpace(cleanLine))
+                    continue;
 
-                else if (line.StartsWith("v")) {
-                    string[] splitLine = line.Split(' ');
-                    for (int i = 0; i < splitLine.Count; i++) 
-                    { splitLine[i] = splitLine[i].Trim(); }
+                if (cleanLine.StartsWith("o") || cleanLine.StartsWith("g")) {
+                    name = cleanLine.Substring(2); 
+                }
 
-                    Vector3 vector3 = new Vector3();
-                    vector3.x = float.Parse(splitLine[1]);
+                else if (cleanLine.StartsWith("v ") && !cleanLine.StartsWith("vn")) {
+                    string[] splitLine = cleanLine.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    Vector3 vector3 = new Vector3(0,0,0);
+                    vector3.x = float.Parse(splitLine[1]); //index 0 is just "v"
                     vector3.y = float.Parse(splitLine[2]);
                     vector3.z = float.Parse(splitLine[3]);
 
+                    vector3 *= scale;
                     mesh.vertices.Add(vector3);
                 }
 
-                else if (line.StartsWith("f"))
-                {
-                    string[] splitLine = line.Split(' ');
-                    for (int i = 1; i <= 3; i++)
-                    { 
-                        splitLine[i] = splitLine[i].Trim();
-                        mesh.indices.Add(int.Parse(splitLine[i]) - 1);
+                else if (cleanLine.StartsWith("f")) //each face is three ints referring to
+                {                              //indexes of vertices in the vertex list
+                    string[] splitLine = cleanLine.Split(' ');
+                    for (int i = 1; i < splitLine.Length; i++)
+                    {
+                        string[] parts = splitLine[i].Split(new[] { ' ', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                        int vertIndex = int.Parse(parts[0]) -1; //obj indexing starts at 1
+                        mesh.indices.Add(vertIndex);
                     }
                 }
+
+                Console.WriteLine($"Loaded {mesh.vertices.Count} vertices, {mesh.indices.Count / 3} triangles.");
             }
         }
     }
