@@ -16,6 +16,12 @@ namespace Prismatix.Geometry
         }
     }
 
+    public class Lamp
+    {
+        public Vector3 position;
+        public float brightness = 10.0f;       
+    }
+
     public class Mesh
     {
         public List<Vector3> vertices = new List<Vector3>(); //hold all sequential vertex positions

@@ -1,9 +1,11 @@
 print("Initializing packages...")
 
+import math
 import os
 import sys
 import clr #pythonnet, NOT colored text thing
 from pathlib import Path
+import time
 
 from PIL import Image
 import numpy as np
@@ -39,8 +41,10 @@ def renderImage(scene, type):
     width = Config.imgWidth
     height = Config.imgHeight
 
+    startTime = time.time()
     if type == "depth":
         byteArrayData = Renderer.RenderDepth(scene)
+    endTime = time.time()
     
     data = np.frombuffer(bytearray(byteArrayData), dtype=np.uint8)
     imgArray = data.reshape((height, width, 3))
@@ -50,6 +54,7 @@ def renderImage(scene, type):
     
     print("Render Complete! :)")
     print(f"Saved as {fileOutput}")
+    print(f"Took {endTime - startTime} seconds to render")
 
 
 scene = Geo.Scene()
@@ -57,7 +62,8 @@ scene = Geo.Scene()
 cube = importObject("CubeBasic")
 scene.AddObject(cube)
 
-camera = Camera(MathP.Vector3(-2.5,-2.5, 1.5), MathP.Vector3(1,1,-0.5), MathP.Vector3(0,0,1))
+camera = Camera(MathP.Vector3(-2.5,-2.5, -1.5), MathP.Vector3(1,1,-0.5), MathP.Vector3(0,0,1))
 scene.mainCamera = camera
+scene.mainCamera.LookAt(MathP.Vector3(0,0,0))
 
 renderImage(scene, "depth")
