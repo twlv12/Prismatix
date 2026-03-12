@@ -1,0 +1,24 @@
+# Ignore Visual Studio/IDE cruft
+.vscode/
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build artifacts
+bin/
+obj/
+*.dll
+*.pdb
+
+# Output
+Gallery/
+
+# Python interop
+__pycache__/
+*.pyc
+
+# OS-specific
+.DS_Store
+Thumbs.db

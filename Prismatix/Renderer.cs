@@ -28,8 +28,6 @@ namespace Prismatix
                             Vector3 c = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 1]];
                             Vector3 b = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 2]];
 
-                            Console.WriteLine($"Triangle: A {a}, B {b}, C {c}");
-
                             var hit = Utils.GetRayIntersect(ray, a, b, c);
                             if (hit.HasValue) {
                                 if (closestHit == null || hit.Value.distance < closestHit.Value.distance) {
