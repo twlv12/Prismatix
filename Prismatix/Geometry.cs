@@ -18,16 +18,23 @@ namespace Prismatix.Geometry
 
     public class Lamp
     {
+        #region Lamp Data
         public Vector3 position;
-        public float brightness = 10.0f;       
+        public float brightness = 10.0f;
+        
+        public Lamp(Vector3 pos, float lumen){
+            position = pos; 
+            brightness = lumen;
+        }
+        #endregion
     }
 
     public class Mesh
     {
+        #region Mesh Data
         public List<Vector3> vertices = new List<Vector3>(); //hold all sequential vertex positions
         public List<int> indices = new List<int>(); //list of index numbers referring to vertices
         //each 3 ints represents a tri
-
 
         //public Mesh(List<Vector3> verts, List<int> tris)
         //{
@@ -35,19 +42,22 @@ namespace Prismatix.Geometry
         //    indices = tris;
         //}
 
-        public (Vector3, Vector3, Vector3) GetTri(int index)
+        //sad forgotten function :(..... NOT ANYMORE!!!
+        public (Vector3, Vector3, Vector3) GetTri(int index, Vector3 offset)
         {
             int i = index * 3;
             return (
-                vertices[indices[i]],
-                vertices[indices[i + 1]],
-                vertices[indices[i + 2]]
+                offset + vertices[indices[i]],
+                offset + vertices[indices[i + 1]],
+                offset + vertices[indices[i + 2]]
             );
         }
+        #endregion
     }
 
     public class Object
     {
+        #region Constructor
         public Mesh mesh;
         public string name;
         public Vector3 position;
@@ -57,7 +67,10 @@ namespace Prismatix.Geometry
         {
             name = nam; position = pos; scale = scl;
         }
+        #endregion
 
+        #region Mesh Loading
+        //loads a mesh from .obj including name
         public void LoadFromDisk(string filePath)
         {
             mesh = new Mesh();
@@ -69,6 +82,7 @@ namespace Prismatix.Geometry
                 if (string.IsNullOrWhiteSpace(cleanLine))
                     continue;
 
+                #region Check Line Types
                 if (cleanLine.StartsWith("o") || cleanLine.StartsWith("g")) {
                     name = cleanLine.Substring(2); 
                 }
@@ -95,9 +109,11 @@ namespace Prismatix.Geometry
                         mesh.indices.Add(vertIndex);
                     }
                 }
+                #endregion
 
-                Console.WriteLine($"Loaded {mesh.vertices.Count} vertices, {mesh.indices.Count / 3} triangles.");
+                Console.WriteLine($"Loaded {mesh.vertices.Count} vertices & {mesh.indices.Count / 3} triangles");
             }
         }
+        #endregion
     }
 }

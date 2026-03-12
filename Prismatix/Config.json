@@ -1,0 +1,12 @@
+
+{
+  "imgWidth": 1024,
+  "imgHeight": 1024,
+  "fov": 60,
+
+  "maxSamples": 25,
+  "maxBounces": 5,
+  "maxRayDepth": 100,
+
+  "bgColour": [0,0,30]
+}
