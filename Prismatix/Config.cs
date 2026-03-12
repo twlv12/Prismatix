@@ -2,9 +2,9 @@
 {
     public static class Config
     {
-        public static int imgWidth = 256;
-        public static int imgHeight = 256;
-        public static float fov = 110f;
+        public static int imgWidth = 1024;
+        public static int imgHeight = 1024;
+        public static float fov = 90f;
         public static int aspectRatio = imgWidth / imgHeight;
 
         public static int maxSamples = 32;

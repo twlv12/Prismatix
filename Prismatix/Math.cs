@@ -23,19 +23,19 @@ namespace Prismatix.Math
             return magnitude>0 ? this / magnitude : new Vector3(0,0,0);
         }
         public static Vector3 operator +(Vector3 a, Vector3 b) {
-            return new Vector3(a.x + b.x, a.y + b.y, a.z + b.z);
+            return new Vector3(a.x+b.x, a.y+b.y, a.z+b.z);
         }
         public static Vector3 operator -(Vector3 a, Vector3 b) {
-            return new Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
+            return new Vector3(a.x-b.x, a.y-b.y, a.z-b.z);
         }
         public static Vector3 operator *(Vector3 a, float multiplier) {
-            return new Vector3(a.x * multiplier, a.y * multiplier, a.z * multiplier);
+            return new Vector3(a.x*multiplier, a.y*multiplier, a.z*multiplier);
         }
         public static Vector3 operator *(float multiplier, Vector3 a) {
-            return a * multiplier;
+            return a*multiplier; //just use the previous one
         }
         public static Vector3 operator /(Vector3 a, float multiplier) {
-            return new Vector3(a.x / multiplier, a.y / multiplier, a.z / multiplier);
+            return new Vector3(a.x/multiplier, a.y/multiplier, a.z/multiplier);
         }
     }
 
@@ -101,7 +101,8 @@ namespace Prismatix.Math
             if (barycentricC < 0 || barycentricC > 1) { return null; }
 
             float barycentricB = Dot(ray.direction, rayCrossVertAtoRay) * invDeterminent;
-            if (barycentricB < 0 || barycentricB > 1) { return null; }
+            if (barycentricB < 0 || barycentricB + barycentricC > 1) { return null; }
+            //previously forgot to add barycentricC 
 
             float distance = Dot(edgeAC, rayCrossVertAtoRay) * invDeterminent;
             if (distance < 0) { return null; } //ray goes away from triangle

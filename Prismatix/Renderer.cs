@@ -7,13 +7,16 @@ namespace Prismatix
 {
     public class Renderer
     {
-        public static byte[] Render(Scene scene)
+        public static byte[] RenderDepth(Scene scene)
         {
             int width = Config.imgWidth;
             int height = Config.imgHeight;
 
             //multiply by 3 to give 3 bytes for each RGB
-            byte[] image = new byte[width * height * 3];
+            byte[] image = new byte[width*height*3];
+            float[] depthBuffer = new float[width*height];
+            float minDepth = float.MaxValue;
+            float maxDepth = float.MinValue;
 
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
@@ -25,10 +28,8 @@ namespace Prismatix
                         for (int i = 0; i < obj.mesh.indices.Count; i += 3)
                         {
                             Vector3 a = obj.position + obj.mesh.vertices[obj.mesh.indices[i]];
-                            Vector3 c = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 1]];
-                            Vector3 b = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 2]];
-
-                            Console.WriteLine($"Triangle: A {a}, B {b}, C {c}");
+                            Vector3 b = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 1]];
+                            Vector3 c = obj.position + obj.mesh.vertices[obj.mesh.indices[i + 2]];
 
                             var hit = Utils.GetRayIntersect(ray, a, b, c);
                             if (hit.HasValue) {
@@ -39,31 +40,102 @@ namespace Prismatix
                         }
                     }
 
-                    int index = (y * width + x) * 3; //index of first byte (R) for x,y
-                    byte shade = 0;
-
+                    float depth = -1;
                     if (closestHit.HasValue)
                     {
-                        float depth = Utils.Remap(closestHit.Value.distance, 0, 25f, 255, 0);
-                        shade = (byte)Utils.Clamp(depth, 0f, 255f);
+                        depth = closestHit.Value.distance; //use these .Value things for nullable (HitInfo?) structs
+                        if (depth < minDepth) minDepth = depth;
+                        if (depth > maxDepth) maxDepth = depth;
                     }
-                    else { shade = 0; }
 
-                    image[index] = shade;
-                    image[index + 1] = shade;
-                    image[index + 2] = shade;              
+                    depthBuffer[y * width + x] = depth;         
                 }
+
+            for (int i = 0; i < depthBuffer.Length; i++){ //now convert all to colour
+                float depth = depthBuffer[i];
+                byte shade = 0;
+
+                if (depth >= 0){
+                    float value = Utils.Remap(depth, minDepth, maxDepth, 255, 0);
+                    shade = (byte)Utils.Clamp(value, 0, 255);
+                }
+
+                image[i * 3] = shade;
+                image[i * 3 + 1] = shade;
+                image[i * 3 + 2] = shade;
+            }
             return image;
         }
+
+        public static byte[] RenderShaded(Scene scene)
+        {
+            int width = Config.imgWidth;
+            int height = Config.imgHeight;
+
+            //multiply by 3 to give 3 bytes for each RGB
+            byte[] image = new byte[width * height * 3];
+            float[] depthBuffer = new float[width * height];
+            float minDepth = float.MaxValue;
+            float maxDepth = float.MinValue;
+
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    Raycast ray = scene.mainCamera.ShootRay(x, y);
+                    HitInfo? closestHit = null;
+
+                    foreach (var obj in scene.objects)
+                    {
+                        for (int i = 0; i < obj.mesh.indices.Count; i += 3)
+                        {
+                            Vector3 a = obj.position + obj.mesh.vertices[obj.mesh.indices[i]];
+                            Vector3 b = obj.position + obj.mesh.vertices[obj.mesh.indices[i+1]];
+                            Vector3 c = obj.position + obj.mesh.vertices[obj.mesh.indices[i +2]];
+
+                            var hit = Utils.GetRayIntersect(ray, a, b, c);
+                            if (hit.HasValue){
+                                if (closestHit == null || hit.Value.distance < closestHit.Value.distance){
+                                    closestHit = hit;
+                                }
+                            }
+                        }
+                    }
+
+                    float depth = -1;
+                    if (closestHit.HasValue)
+                    {
+                        depth = closestHit.Value.distance; //use these .Value things for nullable (HitInfo?) structs
+                        if (depth < minDepth) minDepth = depth;
+                        if (depth > maxDepth) maxDepth = depth;
+                    }
+
+                    depthBuffer[y * width + x] = depth;
+                }
+
+            for (int i = 0; i < depthBuffer.Length; i++)
+            { //now convert all to colour
+                float depth = depthBuffer[i];
+                byte shade = 0;
+
+                if (depth >= 0)
+                {
+                    float value = Utils.Remap(depth, minDepth, maxDepth, 255, 0);
+                    shade = (byte)Utils.Clamp(value, 0, 255);
+                }
+
+                image[i*3] = shade;
+                image[i*3 + 1] = shade;
+                image[i*3 + 2] = shade;
+            }
+            return image;
+        } //NOT YET IMPLEMENTED
     }
 
-    public class Raycast
-    {
+    public class Raycast {
         public Vector3 origin;
         public Vector3 direction;
 
-        public Raycast(Vector3 start, Vector3 dir)
-        {
+        public Raycast(Vector3 start, Vector3 dir){
             origin = start;
             direction = dir;
         }
@@ -72,7 +144,7 @@ namespace Prismatix
     public class Camera
     {
         public Vector3 position;
-        public Vector3 forward; ///vectors used for rays
+        public Vector3 forward; //vectors used for rays
         public Vector3 up;
         public Vector3 right;
 
@@ -90,20 +162,33 @@ namespace Prismatix
             vpWidth = vpHeight * Config.aspectRatio;
 
             Vector3 center = position + forward; //origin is top left of viewplane
-            Vector3 origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
+            origin = center - right*(vpWidth / 2f) - up*(vpHeight / 2f);
+            //previously had Vector3 origin here, which was only creating local var. meaning tris
+            //were created relative to camera origin and not in world space, I think that was the issue
         }
 
         public Raycast ShootRay(int x, int y)
         {
-            float u = (float)x / (Config.imgWidth - 1);
-            float v = (float)y / (Config.imgHeight - 1);
+            float u = (float)x / (Config.imgWidth -1);
+            float v = (float)y / (Config.imgHeight -1);
 
-            Vector3 pixelVector = origin + right * (u * vpWidth) + up * (v * vpHeight);
+            Vector3 pixelVector = origin + right*(u*vpWidth) + up*(v*vpHeight);
             Vector3 rayDirection = (pixelVector - position).Normalized();
 
             Raycast ray = new Raycast(position, rayDirection);
 
             return ray;
+        }
+
+        public void RotateTo(Vector3 target)
+        {
+            forward = (target - position).Normalized();
+
+            right = Utils.Cross(forward, new Vector3(0, 0, 1)).Normalized();
+            up = Utils.Cross(right, forward).Normalized();
+
+            Vector3 center = position + forward;
+            origin = center - right*(vpWidth / 2f) - up*(vpHeight / 2f);
         }
     }
 }
