@@ -50,6 +50,7 @@ def importObject(fileName, name="UNDEFINED"):
     print(f"Loaded {obj.name} from disk.")
     return obj
 
+frameTime = 10
 def renderImageToSurface(scene, type):
     startTime = time.time() #add render modes heres
     if type == "depth":
@@ -64,7 +65,9 @@ def renderImageToSurface(scene, type):
     imgArray = data.reshape((height, width, 3))
 
     endTime = time.time()
-    print(round(endTime-startTime, 2), end=" ")
+    global frameTime
+    frameTime = round(endTime-startTime, 2)
+    if frameTime == 0: frameTime = 10
 
     return pg.surfarray.make_surface(np.transpose(imgArray, (1, 0, 2)))
 
@@ -94,20 +97,47 @@ def drawAxis(surface, camera):
         #create a camera space vector for the axis
         cameraX = -PM.Utils.Dot(vector, camera.right)
         cameraY = -PM.Utils.Dot(vector, camera.up)
-        pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*50, height//2 +cameraY*50), 3)
-        pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*500, height//2 +cameraY*500), 1)
+        if axi == moving:
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*50, height//2 +cameraY*50), 12)
+        else:           
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*50, height//2 +cameraY*50), 3)
+        if axi == moving:
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*500, height//2 +cameraY*500), 6)
+        else:
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*500, height//2 +cameraY*500), 1)
 
     #for gridaxi, (vector, colour) in gridAxis.items():
     #    cameraX = -PM.Utils.Dot(vector, camera.right)
     #    cameraY = -PM.Utils.Dot(vector, camera.up)
     #    pg.draw.line(surface, colour, (width//2 +cameraX*500, height//2 +cameraY*500), (width//2 -cameraX*500, height//2 -cameraY*500), 1)
 
+def drawInfo(screen):
+    lines = [
+        "left/right Arrow to orbit",
+        "up/down Arrow to zoom",
+        "G, x/y/z, -/+ to move object",
+        "",
+        f"Moving: {listeningForMovement}, Axis: {moving}",
+        "",
+        f"Frametime: {frameTime}, FPS: {round(1/frameTime, 1)} (est)",
+        f"Verts: {numVerts}, Tris: {numTris}"
+        "",
+        "",
+    ]
+
+    x, y = 10, 10
+    for line in lines:
+        surface = font.render(line, False, (255,255,255))
+        screen.blit(surface, (x, y))
+        y += surface.get_height()
+
 
 #SCENE CONSTRUCTION --------------------------
 scene = Geo.Scene()
 
-cube = importObject("CubeBasic")
+cube = importObject("Cube")
 scene.AddObject(cube)
+selectedObj = cube
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(0,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
@@ -127,11 +157,23 @@ height = Config.imgHeight
 sceen = pg.display.set_mode((width, height))
 pg.display.set_caption("Prismatix")
 clock = pg.time.Clock()
+font = pg.font.Font("font.ttf", 16)
+
+numVerts = 0
+numTris = 0
+for obj in scene.objects:
+    numVerts += len(obj.mesh.vertices)
+    numTris += len(obj.mesh.vertices)//3
 
 running = True
 rendering = True
 surface = None
 angle = 0
+listeningForMovement = False
+moving = None
+vector = PM.Vector3(0,0,0)
+
+drawInfo(sceen)
 #endregion
 
 while running:
@@ -141,17 +183,38 @@ while running:
         if event.type == pg.KEYDOWN:
             if event.key == pg.K_LEFT:
                 angle -= 0.2
-                rendering = True
             if event.key == pg.K_RIGHT:
                 angle += 0.2
-                rendering = True
             if event.key == pg.K_UP:
                 radius -= 1
-                rendering = True
             if event.key == pg.K_DOWN:
                 radius += 1
-                rendering = True
 
+            if event.key == pg.K_d:
+                renderType = "depth"
+            if event.key == pg.K_n:
+                renderType = "normal"
+
+            if event.key == pg.K_g:
+                listeningForMovement = not listeningForMovement
+                moving = None
+            if listeningForMovement:
+                if event.key == pg.K_x:
+                    moving = "x"
+                    vector = PM.Vector3(0.2,0,0)
+                if event.key == pg.K_y:
+                    moving = "y"
+                    vector = PM.Vector3(0,0.2,0)
+                if event.key == pg.K_z:
+                    moving = "z"
+                    vector = PM.Vector3(0,0,0.2)
+                if event.key == pg.K_EQUALS:
+                    selectedObj.position = selectedObj.position - vector
+                if event.key == pg.K_MINUS:
+                    selectedObj.position = selectedObj.position + vector
+
+            rendering = True
+    
     if rendering:
         x = radius * math.cos(angle)
         y = radius * math.sin(angle)
@@ -164,6 +227,7 @@ while running:
     if surface != None:
         sceen.blit(surface, (0,0))
         drawAxis(sceen, camera)
+        drawInfo(sceen)
 
     pg.display.flip()
     clock.tick(60)

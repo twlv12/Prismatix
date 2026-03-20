@@ -87,13 +87,13 @@ namespace Prismatix.Math
         //gives the 2d vector perpendicular to the two input vectors 
         public static Vector3 Cross(Vector3 a, Vector3 b){
             return new Vector3(
-            a.y * b.z - a.z * b.y,
-            a.z * b.x - a.x * b.z,
-            a.x * b.y - a.y * b.x
+            a.y*b.z - a.z*b.y,
+            a.z*b.x - a.x*b.z,
+            a.x*b.y - a.y*b.x
             );
         }
         public static float Dot(Vector3 a, Vector3 b){
-            return a.x * b.x + a.y * b.y + a.z * b.z;
+            return a.x*b.x + a.y*b.y + a.z*b.z;
         }
         public static float Remap(float value, float inMin, float inMax, float outMin, float outMax){
             return outMin + (value - inMin) * (outMax - outMin) / (inMax - inMin);
