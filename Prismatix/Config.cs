@@ -35,7 +35,7 @@ namespace Prismatix
             maxRayDepth = config.maxRayDepth;
             bgColour = config.bgColour;
 
-            Console.WriteLine($"Resolution: {imgWidth}x{imgHeight} FOV: {fov}");
+            Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fov}rad");
         }
 
         private class ConfigData

@@ -1,38 +1,49 @@
-print("Initializing packages...")
+import os
+def p(done=False):
+    global c
+    done = "Done!" if done else ""
+    os.system('cls')
+    print(current+("-"*c)+" "*(m-c)+f"] {done}")
+    c += 1
+
+LocalPathToDLL = "bin/Debug/netstandard2.0/Prismatix.dll"
 
 #Imports & DLL Load
 #region
-import math
-import os
-import sys
-import clr #pythonnet, NOT colored text thing
-from pathlib import Path
-import time
-from PIL import Image
-import numpy as np
-import platform
+current="Initializing packages... ["; c=0; m = 7
 
-print("Architecture: ", platform.architecture())
+import math; p()
+import clr; p() #pythonnet, NOT colored text thing
+from pathlib import Path; p()
+import time; p()
+from PIL import Image; p()
+import numpy as np; p()
+import sys; p()
+import platform; p(done=True)
+
+print("\nArchitecture: ", platform.architecture())
 print("Python: ", sys.executable)
-print("Importing DLLs...")
-dllPath = Path(__file__).parent / "bin/Debug/netstandard2.0/Prismatix.dll"
-print(dllPath.exists())
+print("Importing DLLs..."); c=0; m = 8
+dllPath = Path(__file__).parent / LocalPathToDLL; p()
+
+if dllPath.exists() == False:
+    print("DLL not found. Set the dll path above.")
+    exit()
 print(dllPath)
 
-clr.AddReference(str(dllPath)) #create a python lib to import
-from Prismatix import Renderer
-from Prismatix import Camera
-from Prismatix import Config
-import Prismatix.Math as PM
-import Prismatix.Geometry as Geo
+clr.AddReference(str(dllPath)); p() #create a python lib to import
+from Prismatix import Renderer; p()
+from Prismatix import Camera; p()
+from Prismatix import Config; p()
+import Prismatix.Math as PM; p()
+import Prismatix.Geometry as Geo; p()
 
-Config.Load(str(Path(__file__).parent / "config.json"))
+Config.Load(str(Path(__file__).parent / "config.json")); p(done=True)
 #endregion
 
 
 def importObject(fileName, name="UNDEFINED"):
     obj = Geo.Object(name, PM.Vector3(0,0,0), 1)
-    print(f"Initializing new object...")
     obj.LoadFromDisk(str(Path(__file__).parent / f"Geometry/{fileName}.obj"))
     print(f"Loaded {obj.name} from disk.")
     return obj
@@ -51,8 +62,8 @@ def renderImage(scene, type):
         byteArrayData = Renderer.RenderNormal(scene).data
     endTime = time.time()
     
-    print("Expected:", width * height * 3)
-    print("Actual:", len(byteArrayData))
+    #print("Expected:", width * height * 3)
+    #print("Actual:", len(byteArrayData))
 
     data = np.frombuffer(bytearray(byteArrayData), dtype=np.uint8)
     imgArray = data.reshape((height, width, 3))

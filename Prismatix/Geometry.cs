@@ -111,7 +111,7 @@ namespace Prismatix.Geometry
                 }
                 #endregion
 
-                Console.WriteLine($"Loaded {mesh.vertices.Count} vertices & {mesh.indices.Count / 3} triangles");
+                //Console.WriteLine($"Loaded {mesh.vertices.Count} vertices & {mesh.indices.Count / 3} triangles");
             }
         }
         #endregion
