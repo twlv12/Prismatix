@@ -1,7 +1,7 @@
 
 {
-  "imgWidth": 768,
-  "imgHeight": 768,
+  "imgWidth": 1024,
+  "imgHeight": 1024,
   "fov": 60,
 
   "maxSamples": 25,
