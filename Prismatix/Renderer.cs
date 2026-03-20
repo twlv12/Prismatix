@@ -25,7 +25,7 @@ namespace Prismatix
             Parallel.For(0, height, y => //multithread for each row of pixels
             {   for (int x = 0; x < width; x++) //for every pixel...
                 {
-                    Raycast ray = scene.mainCamera.ShootRay(x, y); 
+                    Raycast ray = scene.mainCamera.ShootRay(x, y);
                     HitInfo? closestHit = null;
 
                     #region Geometry Intersections => closestHit
@@ -134,6 +134,196 @@ namespace Prismatix
                     }
 
                     
+                    #endregion
+                }
+            });
+            #endregion
+
+            return image;
+        }
+
+        public static Image RenderDiffuse(Scene scene)
+        {
+            #region Render Setup
+            int width = Config.imgWidth;
+            int height = Config.imgHeight;
+
+            //multiply by 3 to give 3 bytes for each RGB
+            Image image = new Image(width, height);
+            #endregion
+
+            #region Main Rendering Loop => image
+            Parallel.For(0, height, y => //multithread for each row of pixels
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    Raycast ray = scene.mainCamera.ShootRay(x, y);
+                    HitInfo? closestHit = null;
+
+                    #region Geometry Intersections => closestHit
+                    foreach (var obj in scene.objects)
+                    {
+                        for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                        {
+                            var (a, b, c) = obj.mesh.GetTri(i, obj.position);
+                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
+
+                            if (hit.HasValue)
+                            {
+                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance)
+                                {
+                                    closestHit = hit;
+                                }
+                            }
+                        }
+                    }
+                    #endregion
+
+                    #region Shadow Rays & Dot => image
+                    if (!closestHit.HasValue)
+                    { //if no hit so background
+                        image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
+                        continue;
+                    }
+
+                    float illumination = 0f;
+                    if (closestHit.HasValue)
+                    {
+                        foreach (var lamp in scene.lamps)
+                        {
+                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
+                            Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
+
+                            Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
+                            HitInfo? closestShadowHit = null;
+
+                            #region Geometry Intersections => closestShadowHit
+                            foreach (var obj in scene.objects)
+                            {
+                                for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                                {
+                                    var (a, b, c) = obj.mesh.GetTri(i, obj.position);
+                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, a, b, c);
+
+                                    if (shadowHit.HasValue)
+                                    {
+                                        if (!closestShadowHit.HasValue || shadowHit.Value.distance < closestShadowHit.Value.distance)
+                                        {
+                                            closestShadowHit = shadowHit;
+                                        }
+                                    }
+                                }
+                            }
+                            #endregion
+
+                            float distToLamp = vecToLamp.Magnitude();
+                            if (!closestShadowHit.HasValue || closestShadowHit.Value.distance > distToLamp)
+                            {
+                                float dot = Utils.Dot(vecToLamp, closestHit.Value.normal);
+                                if (dot < 0) { dot =  0; }
+                                illumination += (lamp.brightness * dot) / (distToLamp*distToLamp);
+                            }
+                        }
+
+                        float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
+                        image.SetPixel(x, y, new Vector3(pixelLumen, pixelLumen, pixelLumen));
+                    }
+
+                    #endregion
+                }
+            });
+            #endregion
+
+            return image;
+        }
+
+        public static Image RenderDiffuseFast(Scene scene)
+        {
+            #region Render Setup
+            int width = Config.imgWidth;
+            int height = Config.imgHeight;
+
+            //multiply by 3 to give 3 bytes for each RGB
+            Image image = new Image(width, height);
+            #endregion
+
+            #region Main Rendering Loop => image
+            Parallel.For(0, height, y => //multithread for each row of pixels
+            {
+                for (int x = 0; x < width-3; x+=3)
+                {
+                    Raycast ray = scene.mainCamera.ShootRay(x, y);
+                    HitInfo? closestHit = null;
+
+                    #region Geometry Intersections => closestHit
+                    foreach (var obj in scene.objects)
+                    {
+                        for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                        {
+                            var (a, b, c) = obj.mesh.GetTri(i, obj.position);
+                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
+
+                            if (hit.HasValue)
+                            {
+                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance)
+                                {
+                                    closestHit = hit;
+                                }
+                            }
+                        }
+                    }
+                    #endregion
+
+                    #region Shadow Rays & Dot => image
+                    if (!closestHit.HasValue)
+                    { //if no hit so background
+                        image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
+                        continue;
+                    }
+
+                    float illumination = 0f;
+                    if (closestHit.HasValue)
+                    {
+                        foreach (var lamp in scene.lamps)
+                        {
+                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
+                            Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
+
+                            Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
+                            HitInfo? closestShadowHit = null;
+
+                            #region Geometry Intersections => closestShadowHit
+                            foreach (var obj in scene.objects)
+                            {
+                                for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                                {
+                                    var (a, b, c) = obj.mesh.GetTri(i, obj.position);
+                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, a, b, c);
+
+                                    if (shadowHit.HasValue)
+                                    {
+                                        if (!closestShadowHit.HasValue || shadowHit.Value.distance < closestShadowHit.Value.distance)
+                                        {
+                                            closestShadowHit = shadowHit;
+                                        }
+                                    }
+                                }
+                            }
+                            #endregion
+
+                            float distToLamp = vecToLamp.Magnitude();
+                            if (!closestShadowHit.HasValue || closestShadowHit.Value.distance > distToLamp)
+                            {
+                                float dot = Utils.Dot(vecToLamp, closestHit.Value.normal);
+                                if (dot < 0) { dot = 0; }
+                                illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
+                            }
+                        }
+
+                        float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
+                        image.SetPixel(x, y, new Vector3(pixelLumen, pixelLumen, pixelLumen));
+                    }
+
                     #endregion
                 }
             });
