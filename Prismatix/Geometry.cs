@@ -9,28 +9,22 @@ namespace Prismatix.Geometry
     public class Scene
     {
         public List<Object> objects = new List<Object>();
-        public List<Lamp> lamps = new List<Lamp>();
         public Camera mainCamera;
 
         public void AddObject(Object obj){
             objects.Add(obj);
-        }
-        public void AddLamp(Lamp lamp){
-            lamps.Add(lamp);
         }
     }
 
     public class Lamp
     {
         #region Lamp Data
-        public string name;
         public Vector3 position;
         public float brightness = 10.0f;
         
         public Lamp(Vector3 pos, float lumen){
             position = pos; 
             brightness = lumen;
-            name = "Point Lamp";
         }
         #endregion
     }

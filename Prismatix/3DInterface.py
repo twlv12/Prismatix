@@ -1,6 +1,4 @@
 import os
-from selectors import SelectorKey
-from turtle import position
 def p(done=False):
     global c
     done = "Done!" if done else ""
@@ -12,7 +10,7 @@ def p(done=False):
 LocalPathToDLL = "bin/Debug/netstandard2.0/Prismatix.dll"
 #Imports & DLL Load
 #region
-print("Initializing Packages..."); c=0;m=11
+print("Initializing Packages..."); c=0;m=9
 
 import math; p()
 import clr; p() #pythonnet, NOT colored text thing
@@ -23,8 +21,6 @@ import numpy as np; p()
 import sys; p()
 import pygame as pg; p()
 import math; p()
-import threading; p()
-from queue import Queue; p()
 import platform; p(done=True)
 
 print("\nArchitecture: ", platform.architecture())
@@ -55,60 +51,29 @@ def importObject(fileName, name="UNDEFINED"):
     return obj
 
 frameTime = 10
-def threadArrayToSurface(scene,mode="normal"):
-    t = threading.Thread(target=render, args=(scene,), kwargs={'rMode': mode})
-    t.start()
-
-q = Queue()
-def render(scene, rMode):
-    global q
-    q.put(prismatRender(scene, renderMode=rMode))
-
-def prismatRender(scene, renderMode): #add render modes heres
-    internalStartTime = time.time()
-    if renderMode == "depth":
+def renderImageToSurface(scene, type):
+    startTime = time.time() #add render modes heres
+    if type == "depth":
         byteArrayData = Renderer.RenderDepth(scene).data
-    elif renderMode == "normal":
+    if type == "normal":
         byteArrayData = Renderer.RenderNormal(scene).data
-    elif renderMode == "diffuse":
-        byteArrayData = Renderer.RenderDiffuse(scene).data
-    elif renderMode == "fastdiffuse":
-        byteArrayData = Renderer.RenderDiffuseFast(scene).data
-    else: print("No render mode!")
-    frameTime1end = time.time()
     
     #print("Expected:", width * height * 3)
     #print("Actual:", len(byteArrayData))
 
-    data = np.frombuffer(byteArrayData, dtype=np.uint8)
+    data = np.frombuffer(bytearray(byteArrayData), dtype=np.uint8)
     imgArray = data.reshape((height, width, 3))
 
-    internalframeTime = round(frameTime1end-internalStartTime, 2)
-    if internalframeTime == 0: internalframeTime = 1
-    print(f"Internal: {internalframeTime}")
-    return imgArray
+    endTime = time.time()
+    global frameTime
+    frameTime = round(endTime-startTime, 2)
+    if frameTime == 0: frameTime = 10
 
-def worldToScreenCoords(point, camera):
-    #transfer world coordinates to screen space
-    relative = point - camera.position
-
-    x = PM.Utils.Dot(relative, camera.right)
-    y = PM.Utils.Dot(relative, camera.up)
-    z = PM.Utils.Dot(relative, camera.forward)
-   
-    u = (x/z) / camera.vpWidth
-    v = (y/z) / camera.vpHeight
-
-    return ((u*width) + width//2, (v*height) + height//2)
-#this is painful
-def vectorToScreen(vector, camera):
-    x = PM.Utils.Dot(vector, camera.right)
-    y = PM.Utils.Dot(vector, camera.up)
-    return (x*50, y*50)
+    return pg.surfarray.make_surface(np.transpose(imgArray, (1, 0, 2)))
 
 def drawAxis(surface, camera):
     gridLines = 20
-    gridSpacing = 2
+    gridSpacing = 0.5
 
     axis = { #vector and colour in tuple
         "x": (PM.Vector3(1,0,0), (255,0,0)),
@@ -116,69 +81,43 @@ def drawAxis(surface, camera):
         "z": (PM.Vector3(0,0,1), (0,0,255)),
         }
     #gridAxis = {}
-    
-    #region
+    #
     ##create grid lines
     #for i in range(-gridLines, gridLines+1):
     #    offset = i *gridSpacing
     #
-    #    #two for each axis, pos and neg
     #    line1 = PM.Vector3(-gridLines*gridSpacing, offset, 0) #x
     #    line2 = PM.Vector3(gridLines*gridSpacing, offset, 0) #x
     #    line3 = PM.Vector3(offset, -gridLines*gridSpacing, 0) #y
     #    line4 = PM.Vector3(offset, gridLines*gridSpacing, 0) #y
-    #
-    #    for neg, pos in ((line1, line2), (line3, line4)):
-    #        vecNeg = neg - camera.position
-    #        negX = PM.Utils.Dot(vecNeg, camera.right)
-    #        negY = PM.Utils.Dot(vecNeg, camera.up)
-    #
-    #        vecPos = pos - camera.position
-    #        posX = PM.Utils.Dot(vecPos, camera.right)
-    #        posY = PM.Utils.Dot(vecPos, camera.up)
-    #
-    #        pg.draw.line(surface, (50,50,50), 
-    #                     (width//2 + negX*50, height//2 + negY*50),
-    #                     (width//2 + posX*50, height//2 + posY*50), 1)
-    #endregion
-                
+
+
+    
     for axi, (vector, colour) in axis.items():
         #create a camera space vector for the axis
         cameraX = -PM.Utils.Dot(vector, camera.right)
         cameraY = -PM.Utils.Dot(vector, camera.up)
         if axi == moving:
-            pg.draw.line(surface, colour, 
-                         (width//2, height//2), 
-                         (width//2 +cameraX*50, height//2 +cameraY*50), 12)
-            pg.draw.line(surface, colour, 
-                         (width//2, height//2), 
-                         (width//2 +cameraX*500, height//2 +cameraY*500), 6)
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*50, height//2 +cameraY*50), 12)
         else:           
-            pg.draw.line(surface, colour, 
-                         (width//2, height//2), 
-                         (width//2 +cameraX*50, height//2 +cameraY*50), 3)
-            pg.draw.line(surface, colour, 
-                         (width//2, height//2), 
-                         (width//2 +cameraX*500, height//2 +cameraY*500), 1)
-    
-    objOrigin = worldToScreenCoords(selectedObj.position, camera)
-    for axi, (vector, colour) in axis.items():
-        #second rendering for object gizmos
-        vectorX, vectorY = vectorToScreen(vector, camera)
-        axisVector = (objOrigin[0]+vectorX, objOrigin[1]+vectorY)
-        pg.draw.line(surface, colour, objOrigin, axisVector, 2)
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*50, height//2 +cameraY*50), 3)
+        if axi == moving:
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*500, height//2 +cameraY*500), 6)
+        else:
+            pg.draw.line(surface, colour, (width//2, height//2), (width//2 +cameraX*500, height//2 +cameraY*500), 1)
+
+    #for gridaxi, (vector, colour) in gridAxis.items():
+    #    cameraX = -PM.Utils.Dot(vector, camera.right)
+    #    cameraY = -PM.Utils.Dot(vector, camera.up)
+    #    pg.draw.line(surface, colour, (width//2 +cameraX*500, height//2 +cameraY*500), (width//2 -cameraX*500, height//2 -cameraY*500), 1)
 
 def drawInfo(screen):
     lines = [
-        "n: normal, d: depth, i: diffuse",
-        "left/right Arrow to orbit",
         "left/right Arrow to orbit",
         "up/down Arrow to zoom",
         "G, x/y/z, -/+ to move object",
         "",
-        f"Selected: {selectedObj.name} ({selectedIndex})",
         f"Moving: {listeningForMovement}, Axis: {moving}",
-        f"X: {round(selectedObj.position.x,2)}, Y: {round(selectedObj.position.y,2)}, Z: {round(selectedObj.position.z,2)}",
         "",
         f"Frametime: {frameTime}, FPS: {round(1/frameTime, 1)} (est)",
         f"Verts: {numVerts}, Tris: {numTris}"
@@ -188,7 +127,7 @@ def drawInfo(screen):
 
     x, y = 10, 10
     for line in lines:
-        surface = font.render(line, True, (255,255,255))
+        surface = font.render(line, False, (255,255,255))
         screen.blit(surface, (x, y))
         y += surface.get_height()
 
@@ -196,17 +135,15 @@ def drawInfo(screen):
 #SCENE CONSTRUCTION --------------------------
 scene = Geo.Scene()
 
-obj = importObject("Sphere")
-scene.AddObject(obj)
+cube = importObject("Cube")
+scene.AddObject(cube)
+selectedObj = cube
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(0,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
 radius = 5
 
-lamp = Geo.Lamp(PM.Vector3(1.8,-2,-1.8), 800)
-scene.AddLamp(lamp)
-
-renderType = input("\n\nRender depth/normal/diffuse : ").lower()
+renderType = input("\n\nRender depth/normal : ").lower()
 #\SCENE CONSTRUCTION -------------------------
 
 
@@ -220,7 +157,7 @@ height = Config.imgHeight
 sceen = pg.display.set_mode((width, height))
 pg.display.set_caption("Prismatix")
 clock = pg.time.Clock()
-font = pg.font.Font(r"C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix\font.ttf", 16)
+font = pg.font.Font("font.ttf", 16)
 
 numVerts = 0
 numTris = 0
@@ -235,13 +172,6 @@ angle = 0
 listeningForMovement = False
 moving = None
 vector = PM.Vector3(0,0,0)
-
-allSceneObjects = []
-for obj in scene.objects: allSceneObjects.append(obj)
-for lamp in scene.lamps: allSceneObjects.append(lamp)
-
-selectedIndex = 0
-selectedObj = allSceneObjects[selectedIndex]
 
 drawInfo(sceen)
 #endregion
@@ -264,14 +194,6 @@ while running:
                 renderType = "depth"
             if event.key == pg.K_n:
                 renderType = "normal"
-            if event.key == pg.K_i:
-                renderType = "diffuse"
-            if event.key == pg.K_f:
-                renderType = "fastdiffuse"
-
-            if event.key == pg.K_TAB:
-                selectedIndex = (selectedIndex +1) % len(allSceneObjects)
-                selectedObj = allSceneObjects[selectedIndex]
 
             if event.key == pg.K_g:
                 listeningForMovement = not listeningForMovement
@@ -299,14 +221,10 @@ while running:
         camera.position = PM.Vector3(x,y,-3)
         camera.RotateTo(PM.Vector3(0,0,0))
 
-        threadArrayToSurface(scene, mode=renderType)
+        surface = renderImageToSurface(scene, renderType)
         rendering = False
 
-    if not q.empty():
-        imgArray = q.get()
-        surface = pg.surfarray.make_surface(np.transpose(imgArray, (1, 0, 2)))
-        rendering = False
-
+    if surface != None:
         sceen.blit(surface, (0,0))
         drawAxis(sceen, camera)
         drawInfo(sceen)

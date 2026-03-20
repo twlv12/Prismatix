@@ -23,9 +23,6 @@ namespace Prismatix.Math
             float magnitude = (float)SysMath.Sqrt(x*x + y*y + z*z);
             return magnitude>0 ? this / magnitude : new Vector3(0,0,0);
         }
-        public float Magnitude(){
-            return (float)SysMath.Sqrt(x*x + y*y + z*z);
-        }
         public static Vector3 operator +(Vector3 a, Vector3 b) {
             return new Vector3(a.x+b.x, a.y+b.y, a.z+b.z);
         }
@@ -49,7 +46,6 @@ namespace Prismatix.Math
         public Vector3 point;
         public Vector3 normal;
         public float distance;
-        public Boolean lit;
     }
 
     public class Image
