@@ -19,6 +19,15 @@ namespace Prismatix
             float[] depthBuffer = new float[width*height];
             float minDepth = float.MaxValue;
             float maxDepth = float.MinValue;
+
+            foreach (var obj in scene.objects)
+            {
+                if (obj.needsPrecomp)
+                {
+                    obj.BakeAllTris();
+                    obj.CalculateBounds();
+                }
+            }
             #endregion
 
             #region Main Rendering Loop => depthBuffer
@@ -29,15 +38,20 @@ namespace Prismatix
                     HitInfo? closestHit = null;
 
                     #region Geometry Intersections => closestHit
-                    foreach (var obj in scene.objects){
-                        for (int i = 0; i < obj.mesh.indices.Count/3; i++) //for every tri...
-                        {
-                            var (a, b, c) = obj.mesh.GetTri(i, obj.position); //get tri vertices
-                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
+                    foreach (var obj in scene.objects)
+                    {
+                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                            continue;
+                        }
 
-                            if (hit.HasValue) { //had an issue where the if statement was still evaluating when null and crashing
-                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance){
-                                    closestHit = hit; //only take the closest hit
+                        foreach (Triangle tri in obj.bakedTriangles) //for every tri...
+                        {
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
+
+                            if (hit.HasValue){
+                                var hV = hit.Value;
+                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
+                                    closestHit = hV;
                                 }
                             }
                         }
@@ -87,6 +101,13 @@ namespace Prismatix
 
             //multiply by 3 to give 3 bytes for each RGB
             Image image = new Image(width, height);
+
+            foreach (var obj in scene.objects){
+                if (obj.needsPrecomp){
+                    obj.BakeAllTris();
+                    obj.CalculateBounds();
+                }
+            }
             #endregion
 
             #region Main Rendering Loop => image
@@ -99,14 +120,18 @@ namespace Prismatix
                     #region Geometry Intersections => closestHit
                     foreach (var obj in scene.objects)
                     {
-                        for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                            continue;
+                        }
+
+                        foreach (Triangle tri in obj.bakedTriangles)
                         {
-                            var (a, b, c) = obj.mesh.GetTri(i, obj.position);
-                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
 
                             if (hit.HasValue){
-                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance){
-                                    closestHit = hit;
+                                var hV = hit.Value;
+                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
+                                    closestHit = hV;
                                 }
                             }
                         }
@@ -150,6 +175,13 @@ namespace Prismatix
 
             //multiply by 3 to give 3 bytes for each RGB
             Image image = new Image(width, height);
+
+            foreach (var obj in scene.objects){
+                if (obj.needsPrecomp){
+                    obj.BakeAllTris();
+                    obj.CalculateBounds();
+                }
+            }
             #endregion
 
             #region Main Rendering Loop => image
@@ -163,16 +195,18 @@ namespace Prismatix
                     #region Geometry Intersections => closestHit
                     foreach (var obj in scene.objects)
                     {
-                        for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
-                        {
-                            var (a, b, c) = obj.mesh.GetTri(i, obj.position);
-                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
+                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                            continue;
+                        }
 
-                            if (hit.HasValue)
-                            {
-                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance)
-                                {
-                                    closestHit = hit;
+                        foreach (Triangle tri in obj.bakedTriangles)
+                        {
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri, obj);
+
+                            if (hit.HasValue){
+                                var hV = hit.Value;
+                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
+                                    closestHit = hV;
                                 }
                             }
                         }
@@ -191,42 +225,43 @@ namespace Prismatix
                     {
                         foreach (var lamp in scene.lamps)
                         {
+                            Boolean blocked = false;
                             Vector3 vecToLamp = lamp.position - closestHit.Value.point;
                             Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
 
                             Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
-                            HitInfo? closestShadowHit = null;
+                            float distToLamp = vecToLamp.Magnitude();
 
                             #region Geometry Intersections => closestShadowHit
                             foreach (var obj in scene.objects)
                             {
-                                for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
-                                {
-                                    var (a, b, c) = obj.mesh.GetTri(i, obj.position);
-                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, a, b, c);
+                                if (!Utils.GetRayHitsBounds(shadowRay, obj.boundsMin, obj.boundsMax)){
+                                    continue;
+                                }
 
-                                    if (shadowHit.HasValue)
-                                    {
-                                        if (!closestShadowHit.HasValue || shadowHit.Value.distance < closestShadowHit.Value.distance)
-                                        {
-                                            closestShadowHit = shadowHit;
-                                        }
+                                foreach (Triangle tri in obj.bakedTriangles)
+                                {
+                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, tri);
+
+                                    if (shadowHit.HasValue && shadowHit.Value.distance < distToLamp){
+                                        blocked = true;
+                                        break;
                                     }
                                 }
+
+                                if (blocked) { break; }
                             }
                             #endregion
 
-                            float distToLamp = vecToLamp.Magnitude();
-                            if (!closestShadowHit.HasValue || closestShadowHit.Value.distance > distToLamp)
-                            {
-                                float dot = Utils.Dot(vecToLamp, closestHit.Value.normal);
-                                if (dot < 0) { dot =  0; }
-                                illumination += (lamp.brightness * dot) / (distToLamp*distToLamp);
+                            if (!blocked) {
+                                float dot = Utils.Dot(vecToLamp.Normalized(), closestHit.Value.normal);
+                                if (dot < 0) dot = 0;
+                                illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
                             }
                         }
 
                         float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
-                        image.SetPixel(x, y, new Vector3(pixelLumen, pixelLumen, pixelLumen));
+                        image.SetPixel(x, y, pixelLumen*closestHit.Value.material.colour);
                     }
 
                     #endregion
@@ -245,6 +280,13 @@ namespace Prismatix
 
             //multiply by 3 to give 3 bytes for each RGB
             Image image = new Image(width, height);
+
+            foreach (var obj in scene.objects){
+                if (obj.needsPrecomp){
+                    obj.BakeAllTris();
+                    obj.CalculateBounds();
+                }
+            }
             #endregion
 
             #region Main Rendering Loop => image
@@ -258,16 +300,19 @@ namespace Prismatix
                     #region Geometry Intersections => closestHit
                     foreach (var obj in scene.objects)
                     {
-                        for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
-                        {
-                            var (a, b, c) = obj.mesh.GetTri(i, obj.position);
-                            HitInfo? hit = Utils.GetRayIntersect(ray, a, b, c);
 
-                            if (hit.HasValue)
-                            {
-                                if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance)
-                                {
-                                    closestHit = hit;
+                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                            continue;
+                        }
+
+                        foreach (Triangle tri in obj.bakedTriangles)
+                        {
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri, obj);
+
+                            if (hit.HasValue){
+                                var hV = hit.Value;
+                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
+                                    closestHit = hV;
                                 }
                             }
                         }
@@ -286,36 +331,34 @@ namespace Prismatix
                     {
                         foreach (var lamp in scene.lamps)
                         {
+                            Boolean blocked = false;
                             Vector3 vecToLamp = lamp.position - closestHit.Value.point;
                             Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
 
                             Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
-                            HitInfo? closestShadowHit = null;
+                            float distToLamp = vecToLamp.Magnitude();
 
                             #region Geometry Intersections => closestShadowHit
                             foreach (var obj in scene.objects)
                             {
-                                for (int i = 0; i < obj.mesh.indices.Count / 3; i++)
+                                foreach (Triangle tri in obj.bakedTriangles)
                                 {
-                                    var (a, b, c) = obj.mesh.GetTri(i, obj.position);
-                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, a, b, c);
+                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, tri);
 
-                                    if (shadowHit.HasValue)
+                                    if (shadowHit.HasValue && shadowHit.Value.distance < distToLamp)
                                     {
-                                        if (!closestShadowHit.HasValue || shadowHit.Value.distance < closestShadowHit.Value.distance)
-                                        {
-                                            closestShadowHit = shadowHit;
-                                        }
+                                        blocked = true;
+                                        break;
                                     }
                                 }
+
+                                if (blocked) { break; }
                             }
                             #endregion
-
-                            float distToLamp = vecToLamp.Magnitude();
-                            if (!closestShadowHit.HasValue || closestShadowHit.Value.distance > distToLamp)
+                            if (!blocked)
                             {
-                                float dot = Utils.Dot(vecToLamp, closestHit.Value.normal);
-                                if (dot < 0) { dot = 0; }
+                                float dot = Utils.Dot(vecToLamp.Normalized(), closestHit.Value.normal);
+                                if (dot < 0) dot = 0;
                                 illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
                             }
                         }

@@ -55,16 +55,7 @@ def importObject(fileName, name="UNDEFINED"):
     return obj
 
 frameTime = 10
-def threadArrayToSurface(scene,mode="normal"):
-    t = threading.Thread(target=render, args=(scene,), kwargs={'rMode': mode})
-    t.start()
-
-q = Queue()
-def render(scene, rMode):
-    global q
-    q.put(prismatRender(scene, renderMode=rMode))
-
-def prismatRender(scene, renderMode): #add render modes heres
+def renderArrayToImage(scene, renderMode): #add render modes heres
     internalStartTime = time.time()
     if renderMode == "depth":
         byteArrayData = Renderer.RenderDepth(scene).data
@@ -74,18 +65,21 @@ def prismatRender(scene, renderMode): #add render modes heres
         byteArrayData = Renderer.RenderDiffuse(scene).data
     elif renderMode == "fastdiffuse":
         byteArrayData = Renderer.RenderDiffuseFast(scene).data
-    else: print("No render mode!")
-    frameTime1end = time.time()
+    else:
+       print("No render mode selected! Defaulting to normal.")
+       byteArrayData = Renderer.RenderNormal(scene).data
     
+    frameTime1end = time.time()
     #print("Expected:", width * height * 3)
     #print("Actual:", len(byteArrayData))
 
     data = np.frombuffer(byteArrayData, dtype=np.uint8)
     imgArray = data.reshape((height, width, 3))
 
-    internalframeTime = round(frameTime1end-internalStartTime, 2)
-    if internalframeTime == 0: internalframeTime = 1
-    print(f"Internal: {internalframeTime}")
+    global frameTime
+    frameTime = round(frameTime1end-internalStartTime, 2)
+    if frameTime == 0: frameTime = 1
+    #print(f"{frameTime} | ", end="")
     return imgArray
 
 def worldToScreenCoords(point, camera):
@@ -170,10 +164,12 @@ def drawAxis(surface, camera):
 
 def drawInfo(screen):
     lines = [
-        "n: normal, d: depth, i: diffuse",
-        "left/right Arrow to orbit",
-        "left/right Arrow to orbit",
-        "up/down Arrow to zoom",
+        "N: normal, D: depth, I: diffuse, F: fastdiffuse",
+        "Left/Right arrow to orbit",
+        "Left/Right arrow to orbit",
+        "Up/Down arrow to zoom",
+        "TAB to cycle selected",
+        "Q to focus on selected",
         "G, x/y/z, -/+ to move object",
         "",
         f"Selected: {selectedObj.name} ({selectedIndex})",
@@ -196,14 +192,29 @@ def drawInfo(screen):
 #SCENE CONSTRUCTION --------------------------
 scene = Geo.Scene()
 
-obj = importObject("Sphere")
-scene.AddObject(obj)
+
+
+sphere1 = importObject("Sphere")
+scene.AddObject(sphere1)
+sphere1.name = "Sphere1"
+sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
+
+#cube1 = importObject("Cube")
+#scene.AddObject(cube1)
+#cube1.name = "Cube1"
+#cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
+
+#cube2 = importObject("Cube")
+#scene.AddObject(cube2)
+#cube2.name = "Cube2"
+#cube2.material = Geo.Material("redShiny", PM.Vector3(0.2,0.1,1), 1, 0.1)
+#cube2.position = PM.Vector3(0,-3,0)
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(0,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
 radius = 5
 
-lamp = Geo.Lamp(PM.Vector3(1.8,-2,-1.8), 800)
+lamp = Geo.Lamp(PM.Vector3(1.8,-2,-1.8), 2000)
 scene.AddLamp(lamp)
 
 renderType = input("\n\nRender depth/normal/diffuse : ").lower()
@@ -235,6 +246,7 @@ angle = 0
 listeningForMovement = False
 moving = None
 vector = PM.Vector3(0,0,0)
+focused = PM.Vector3(0,0,0)
 
 allSceneObjects = []
 for obj in scene.objects: allSceneObjects.append(obj)
@@ -259,6 +271,8 @@ while running:
                 radius -= 1
             if event.key == pg.K_DOWN:
                 radius += 1
+            if event.key == pg.K_q:
+                focused = selectedObj.position
 
             if event.key == pg.K_d:
                 renderType = "depth"
@@ -288,25 +302,24 @@ while running:
                     vector = PM.Vector3(0,0,0.2)
                 if event.key == pg.K_EQUALS:
                     selectedObj.position = selectedObj.position - vector
+                    selectedObj.needsPrecomp = True
                 if event.key == pg.K_MINUS:
                     selectedObj.position = selectedObj.position + vector
+                    selectedObj.needsPrecomp = True
 
             rendering = True
     
     if rendering:
-        x = radius * math.cos(angle)
-        y = radius * math.sin(angle)
+        x = (radius * math.cos(angle)) + focused.x
+        y = (radius * math.sin(angle)) + focused.y
         camera.position = PM.Vector3(x,y,-3)
-        camera.RotateTo(PM.Vector3(0,0,0))
+        camera.RotateTo(focused)
 
-        threadArrayToSurface(scene, mode=renderType)
-        rendering = False
-
-    if not q.empty():
-        imgArray = q.get()
+        imgArray = renderArrayToImage(scene, renderType)
         surface = pg.surfarray.make_surface(np.transpose(imgArray, (1, 0, 2)))
         rendering = False
 
+    if surface != None:
         sceen.blit(surface, (0,0))
         drawAxis(sceen, camera)
         drawInfo(sceen)

@@ -3,6 +3,7 @@ using Prismatix.Math;
 using System;
 using System.IO;
 using System.Collections.Generic;
+using SysMath = System.Math;
 
 namespace Prismatix.Geometry
 {
@@ -40,6 +41,9 @@ namespace Prismatix.Geometry
         #region Mesh Data
         public List<Vector3> vertices = new List<Vector3>(); //hold all sequential vertex positions
         public List<int> indices = new List<int>(); //list of index numbers referring to vertices
+        public Vector3 boundsMin = new Vector3();
+        public Vector3 boundsMax = new Vector3();
+
         //each 3 ints represents a tri
 
         //public Mesh(List<Vector3> verts, List<int> tris)
@@ -68,12 +72,50 @@ namespace Prismatix.Geometry
         public string name;
         public Vector3 position;
         public float scale;
+        public Material material;
+        public List<Triangle> bakedTriangles = new List<Triangle>();
+        public Boolean needsPrecomp = true;
+        public Vector3 boundsMin;
+        public Vector3 boundsMax;
 
         public Object(string nam, Vector3 pos, float scl)
         {
             name = nam; position = pos; scale = scl;
         }
         #endregion
+
+        public void BakeAllTris()
+        {
+            bakedTriangles.Clear();
+            for (int i = 0; i < mesh.indices.Count / 3; i++)
+            {
+                var (a, b, c) = mesh.GetTri(i, position);
+                Vector3 normal = Utils.Cross(b-a, c-a).Normalized();
+
+                bakedTriangles.Add(new Triangle { a=a, b=b, c=c, normal=normal });
+            }
+            needsPrecomp = false;
+        }
+
+        public void CalculateBounds()
+        {
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            foreach (var tri in bakedTriangles)
+            {
+                min = Utils.Min(tri.a, min);
+                min = Utils.Min(tri.b, min);
+                min = Utils.Min(tri.c, min);
+
+                max = Utils.Max(tri.a, max);
+                max = Utils.Max(tri.b, max);
+                max = Utils.Max(tri.c, max);
+            }
+
+            boundsMin = min;
+            boundsMax = max;
+        }
 
         #region Mesh Loading
         //loads a mesh from .obj including name
@@ -121,5 +163,20 @@ namespace Prismatix.Geometry
             }
         }
         #endregion
+    }
+
+    public class Material
+    {
+        public string name;
+        public Vector3 colour;
+        public float specular;
+        public float roughness;
+
+        public Material(string nam, Vector3 col, float spec, float ruf){
+            name = nam;
+            colour = col;
+            specular = spec;
+            roughness = ruf;
+        }
     }
 }

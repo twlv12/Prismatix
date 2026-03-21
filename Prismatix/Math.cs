@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using Prismatix;
+using Prismatix.Geometry;
 using SysMath = System.Math;
 
 namespace Prismatix.Math
@@ -50,6 +51,13 @@ namespace Prismatix.Math
         public Vector3 normal;
         public float distance;
         public Boolean lit;
+        public Material material;
+    }
+
+    public struct Triangle
+    {
+        public Vector3 a, b, c;
+        public Vector3 normal;
     }
 
     public class Image
@@ -107,12 +115,37 @@ namespace Prismatix.Math
             if (value > max) { value = max; } 
             return value;
         }
+        public static Vector3 Min(Vector3 a, Vector3 b)
+        {
+            Vector3 result = new Vector3();
+            if (a.x < b.x) { result.x = a.x; }
+            else { result.x = b.x; }
+            if (a.y < b.y) { result.y = a.y; }
+            else { result.y = b.y; }
+            if (a.z < b.z) { result.z = a.z; }
+            else { result.z = b.z; }
+            return result;
+        }
+        public static Vector3 Max(Vector3 a, Vector3 b)
+        {
+            Vector3 result = new Vector3();
+            if (a.x < b.x) { result.x = b.x; }
+            else { result.x = a.x; }
+            if (a.y < b.y) { result.y = b.y; }
+            else { result.y = a.y; }
+            if (a.z < b.z) { result.z = b.z; }
+            else { result.z = a.z; }
+            return result;
+        }
         #endregion
 
         #region Cool Math Functions
-        public static HitInfo? GetRayIntersect(Raycast ray, Vector3 a, Vector3 b, Vector3 c)
+        public static HitInfo? GetRayIntersect(Raycast ray, Triangle trig, Geometry.Object obj=null)
         {
             //using Moller-Trumbore algorithm
+            Vector3 a = trig.a;
+            Vector3 b = trig.b;
+            Vector3 c = trig.c;
             Vector3 edgeAB = b - a; //vectors of edges of A
             Vector3 edgeAC = c - a;
 
@@ -146,10 +179,58 @@ namespace Prismatix.Math
 
             HitInfo hitInfo = new HitInfo();
             hitInfo.point = ray.origin + ray.direction * distance;
-            hitInfo.normal = Cross(edgeAB, edgeAC).Normalized(); //normal is perpendicular to triangle
+            hitInfo.normal = trig.normal;
             hitInfo.distance = distance;
+            if (obj != null){
+                hitInfo.material = obj.material;}
+            else{
+                hitInfo.material = new Material("white", new Vector3(1, 1, 1), 1, 1);}
 
-            return hitInfo;
+                return hitInfo;
+        }
+
+        public static bool GetRayHitsBounds(Raycast ray, Vector3 min, Vector3 max)
+        {
+            //t representing time along the ray
+            float tEnterX = (min.x -ray.origin.x) /ray.direction.x;
+            float tExitX = (max.x -ray.origin.x) /ray.direction.x;
+
+            if (tEnterX> tExitX){ //flip so enter is larger
+                float temp = tEnterX;
+                tEnterX = tExitX;
+                tExitX = temp;
+            }
+
+            float tEnterY = (min.y -ray.origin.y) /ray.direction.y;
+            float tExitY = (max.y -ray.origin.y) /ray.direction.y;
+
+            if (tEnterY> tExitY){
+                float temp = tEnterY;
+                tEnterY = tExitY;
+                tExitY = temp;
+            }
+
+            if (tEnterX> tExitY || tEnterY> tExitX)
+                return false;
+
+            float tEnter = SysMath.Max(tEnterX, tEnterY);
+            float tExit = SysMath.Min(tExitX, tExitY);
+
+            float tEnterZ = (min.z - ray.origin.z) /ray.direction.z;
+            float tExitZ = (max.z - ray.origin.z) /ray.direction.z;
+
+            if (tEnterZ > tExitZ)
+            {
+                float temp = tEnterZ;
+                tEnterZ = tExitZ;
+                tExitZ = temp;
+            }
+
+            //final check if thru any
+            if (tEnter > tExitZ || tEnterZ > tExit)
+                return false;
+
+            return true;
         }
         #endregion
     }
