@@ -57,9 +57,9 @@ namespace Prismatix.Geometry
         {
             int i = index * 3;
             return (
-                offset + vertices[indices[i]],
-                offset + vertices[indices[i + 1]],
-                offset + vertices[indices[i + 2]]
+                Utils.FormatVector(offset + vertices[indices[i]]),
+                Utils.FormatVector(offset + vertices[indices[i+1]]),
+                Utils.FormatVector(offset + vertices[indices[i+2]])
             );
         }
         #endregion
@@ -91,8 +91,10 @@ namespace Prismatix.Geometry
             {
                 var (a, b, c) = mesh.GetTri(i, position);
                 Vector3 normal = Utils.Cross(b-a, c-a).Normalized();
+                Vector3 edgeAB = b - a;
+                Vector3 edgeAC = c - a;
 
-                bakedTriangles.Add(new Triangle { a=a, b=b, c=c, normal=normal });
+                bakedTriangles.Add(new Triangle { a=a, b=b, c=c, normal=normal, edgeAB=edgeAB, edgeAC=edgeAC });
             }
             needsPrecomp = false;
         }

@@ -50,13 +50,14 @@ namespace Prismatix.Math
         public Vector3 point;
         public Vector3 normal;
         public float distance;
-        public Boolean lit;
         public Material material;
     }
 
     public struct Triangle
     {
         public Vector3 a, b, c;
+        public Vector3 edgeAB;
+        public Vector3 edgeAC;
         public Vector3 normal;
     }
 
@@ -115,8 +116,7 @@ namespace Prismatix.Math
             if (value > max) { value = max; } 
             return value;
         }
-        public static Vector3 Min(Vector3 a, Vector3 b)
-        {
+        public static Vector3 Min(Vector3 a, Vector3 b){
             Vector3 result = new Vector3();
             if (a.x < b.x) { result.x = a.x; }
             else { result.x = b.x; }
@@ -126,8 +126,7 @@ namespace Prismatix.Math
             else { result.z = b.z; }
             return result;
         }
-        public static Vector3 Max(Vector3 a, Vector3 b)
-        {
+        public static Vector3 Max(Vector3 a, Vector3 b){
             Vector3 result = new Vector3();
             if (a.x < b.x) { result.x = b.x; }
             else { result.x = a.x; }
@@ -137,17 +136,21 @@ namespace Prismatix.Math
             else { result.z = a.z; }
             return result;
         }
+        public static Vector3 FormatVector(Vector3 a)
+        {
+            return new Vector3(a.x, a.z, -a.y);
+        }
         #endregion
 
         #region Cool Math Functions
-        public static HitInfo? GetRayIntersect(Raycast ray, Triangle trig, Geometry.Object obj=null)
+        public static HitInfo? GetRayIntersect(Raycast ray, Triangle trig)
         {
             //using Moller-Trumbore algorithm
             Vector3 a = trig.a;
             Vector3 b = trig.b;
             Vector3 c = trig.c;
-            Vector3 edgeAB = b - a; //vectors of edges of A
-            Vector3 edgeAC = c - a;
+            Vector3 edgeAB = trig.edgeAB; //vectors of edges of A
+            Vector3 edgeAC = trig.edgeAC;
 
             //the dot product is a scalar value that represnts how aligned
             //two vectors are. >0: same direction, <0: opposite direction, 0: perpendicular
@@ -181,12 +184,8 @@ namespace Prismatix.Math
             hitInfo.point = ray.origin + ray.direction * distance;
             hitInfo.normal = trig.normal;
             hitInfo.distance = distance;
-            if (obj != null){
-                hitInfo.material = obj.material;}
-            else{
-                hitInfo.material = new Material("white", new Vector3(1, 1, 1), 1, 1);}
 
-                return hitInfo;
+            return hitInfo;
         }
 
         public static bool GetRayHitsBounds(Raycast ray, Vector3 min, Vector3 max)

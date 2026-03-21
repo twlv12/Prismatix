@@ -1,6 +1,4 @@
 import os
-from selectors import SelectorKey
-from turtle import position
 def p(done=False):
     global c
     done = "Done!" if done else ""
@@ -48,15 +46,16 @@ Config.Load(str(Path(__file__).parent / "config.json")); p(done=True)
 #endregion
 
 
+
 def importObject(fileName, name="UNDEFINED"):
     obj = Geo.Object(name, PM.Vector3(0,0,0), 1)
     obj.LoadFromDisk(str(Path(__file__).parent / f"Geometry/{fileName}.obj"))
     print(f"Loaded {obj.name} from disk.")
     return obj
-
 frameTime = 10
 def renderArrayToImage(scene, renderMode): #add render modes heres
     internalStartTime = time.time()
+    global renderType
     if renderMode == "depth":
         byteArrayData = Renderer.RenderDepth(scene).data
     elif renderMode == "normal":
@@ -67,9 +66,9 @@ def renderArrayToImage(scene, renderMode): #add render modes heres
         byteArrayData = Renderer.RenderDiffuseFast(scene).data
     else:
        print("No render mode selected! Defaulting to normal.")
+       renderMode, renderType = "normal", "normal"
        byteArrayData = Renderer.RenderNormal(scene).data
     
-    frameTime1end = time.time()
     #print("Expected:", width * height * 3)
     #print("Actual:", len(byteArrayData))
 
@@ -77,7 +76,8 @@ def renderArrayToImage(scene, renderMode): #add render modes heres
     imgArray = data.reshape((height, width, 3))
 
     global frameTime
-    frameTime = round(frameTime1end-internalStartTime, 2)
+    frameTime1end = time.time()
+    frameTime = round(frameTime1end-internalStartTime, 4)
     if frameTime == 0: frameTime = 1
     #print(f"{frameTime} | ", end="")
     return imgArray
@@ -176,8 +176,10 @@ def drawInfo(screen):
         f"Moving: {listeningForMovement}, Axis: {moving}",
         f"X: {round(selectedObj.position.x,2)}, Y: {round(selectedObj.position.y,2)}, Z: {round(selectedObj.position.z,2)}",
         "",
+        f"A: {round(angle,2)}, R: {round(radius,2)}, H: {round(height,1)}",
         f"Frametime: {frameTime}, FPS: {round(1/frameTime, 1)} (est)",
-        f"Verts: {numVerts}, Tris: {numTris}"
+        f"Verts: {numVerts}, Tris: {numTris}",
+        f"Frametime/Tris: {round(frameTime/numTris,5)}",
         "",
         "",
     ]
@@ -189,20 +191,21 @@ def drawInfo(screen):
         y += surface.get_height()
 
 
+
 #SCENE CONSTRUCTION --------------------------
 scene = Geo.Scene()
 
 
 
-sphere1 = importObject("Sphere")
-scene.AddObject(sphere1)
-sphere1.name = "Sphere1"
-sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
+#sphere1 = importObject("Sphere")
+#scene.AddObject(sphere1)
+#sphere1.name = "Sphere1"
+#sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
 
-#cube1 = importObject("Cube")
-#scene.AddObject(cube1)
-#cube1.name = "Cube1"
-#cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
+cube1 = importObject("Suzanne")
+scene.AddObject(cube1)
+cube1.name = "Cube1"
+cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
 
 #cube2 = importObject("Cube")
 #scene.AddObject(cube2)
@@ -223,7 +226,7 @@ renderType = input("\n\nRender depth/normal/diffuse : ").lower()
 
 #Pygame Initialization
 #region
-print("Initializing 3D Viewer...")
+print("Initializing 3D Editor...")
 pg.init()
 width = Config.imgWidth
 height = Config.imgHeight
@@ -232,17 +235,20 @@ sceen = pg.display.set_mode((width, height))
 pg.display.set_caption("Prismatix")
 clock = pg.time.Clock()
 font = pg.font.Font(r"C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix\font.ttf", 16)
+print("Screen OK...")
 
 numVerts = 0
 numTris = 0
 for obj in scene.objects:
     numVerts += len(obj.mesh.vertices)
-    numTris += len(obj.mesh.vertices)//3
+    numTris += len(obj.mesh.indices)//3
+print(f"Vertices: {numVerts}, Triangles: {numTris}")
 
 running = True
 rendering = True
 surface = None
 angle = 0
+camHeight = -3
 listeningForMovement = False
 moving = None
 vector = PM.Vector3(0,0,0)
@@ -251,11 +257,13 @@ focused = PM.Vector3(0,0,0)
 allSceneObjects = []
 for obj in scene.objects: allSceneObjects.append(obj)
 for lamp in scene.lamps: allSceneObjects.append(lamp)
+for allObj in allSceneObjects: print(f"Obj: {allObj.name}")
 
 selectedIndex = 0
 selectedObj = allSceneObjects[selectedIndex]
 
 drawInfo(sceen)
+print("Ready!")
 #endregion
 
 while running:
@@ -271,6 +279,10 @@ while running:
                 radius -= 1
             if event.key == pg.K_DOWN:
                 radius += 1
+            if event.key == pg.K_y:
+                camHeight -= 1
+            if event.key == pg.K_h:
+                camHeight += 1
             if event.key == pg.K_q:
                 focused = selectedObj.position
 
@@ -312,7 +324,7 @@ while running:
     if rendering:
         x = (radius * math.cos(angle)) + focused.x
         y = (radius * math.sin(angle)) + focused.y
-        camera.position = PM.Vector3(x,y,-3)
+        camera.position = PM.Vector3(x,y,camHeight)
         camera.RotateTo(focused)
 
         imgArray = renderArrayToImage(scene, renderType)
@@ -326,3 +338,5 @@ while running:
 
     pg.display.flip()
     clock.tick(60)
+
+print("\nShutting Down...")

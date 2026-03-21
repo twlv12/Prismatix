@@ -8,6 +8,7 @@ namespace Prismatix
     //this is a short intermediate utility to load the data from the json
     //so that i dont have to rebuild every time to change the config
 
+//MAKE SURE TO ADD ALL FOUR REFS FOR ANY NEW CONFIG VAR
     public static class Config
     {
         public static int imgWidth { get; set; }
@@ -18,6 +19,7 @@ namespace Prismatix
         public static float maxBounces { get; set; }
         public static float maxRayDepth { get; set; }
         public static int[] bgColour { get; set; }
+        public static int[] bgLight { get; set; }
 
         public static void Load(string path)
         {
@@ -34,6 +36,7 @@ namespace Prismatix
             maxBounces = config.maxBounces;
             maxRayDepth = config.maxRayDepth;
             bgColour = config.bgColour;
+            bgLight = config.bgLight;
 
             Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fov}rad");
         }
@@ -48,6 +51,7 @@ namespace Prismatix
             public float maxBounces { get; set; }
             public float maxRayDepth { get; set; }
             public int[] bgColour { get; set; }
+            public int[] bgLight { get; set; }
         }
     }
 }

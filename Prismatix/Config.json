@@ -4,9 +4,10 @@
   "imgHeight": 1024,
   "fov": 60,
 
-  "maxSamples": 25,
+  "samplesPerPixel": 1,
   "maxBounces": 5,
   "maxRayDepth": 100,
 
-  "bgColour": [0,0,30]
+  "bgColour": [ 0, 0, 50 ],
+  "bgLight":  [0, 0, 30]
 }

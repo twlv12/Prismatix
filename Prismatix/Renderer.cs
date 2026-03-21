@@ -201,22 +201,26 @@ namespace Prismatix
 
                         foreach (Triangle tri in obj.bakedTriangles)
                         {
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri, obj);
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
 
                             if (hit.HasValue){
                                 var hV = hit.Value;
                                 if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
                                     closestHit = hV;
                                 }
+                                hV.material = obj.material;
                             }
                         }
                     }
                     #endregion
 
                     #region Shadow Rays & Dot => image
+                    Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
+                    Vector3 bgLight = new Vector3(Config.bgLight[0], Config.bgLight[1], Config.bgLight[2]);
+
                     if (!closestHit.HasValue)
                     { //if no hit so background
-                        image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
+                        image.SetPixel(x, y, bgColour);
                         continue;
                     }
 
@@ -229,8 +233,10 @@ namespace Prismatix
                             Vector3 vecToLamp = lamp.position - closestHit.Value.point;
                             Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
 
-                            Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
                             float distToLamp = vecToLamp.Magnitude();
+                            Vector3 dirToLamp = vecToLamp/distToLamp;
+
+                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp); 
 
                             #region Geometry Intersections => closestShadowHit
                             foreach (var obj in scene.objects)
@@ -253,15 +259,17 @@ namespace Prismatix
                             }
                             #endregion
 
+                            #region Shade => image
                             if (!blocked) {
-                                float dot = Utils.Dot(vecToLamp.Normalized(), closestHit.Value.normal);
+                                float dot = Utils.Dot(dirToLamp, closestHit.Value.normal);
                                 if (dot < 0) dot = 0;
                                 illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
                             }
                         }
 
                         float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
-                        image.SetPixel(x, y, pixelLumen*closestHit.Value.material.colour);
+                        image.SetPixel(x, y, pixelLumen*closestHit.Value.material.colour +bgLight);
+                        #endregion
                     }
 
                     #endregion
@@ -307,7 +315,7 @@ namespace Prismatix
 
                         foreach (Triangle tri in obj.bakedTriangles)
                         {
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri, obj);
+                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
 
                             if (hit.HasValue){
                                 var hV = hit.Value;
@@ -335,8 +343,10 @@ namespace Prismatix
                             Vector3 vecToLamp = lamp.position - closestHit.Value.point;
                             Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
 
-                            Raycast shadowRay = new Raycast(shadowRayOrigin, vecToLamp.Normalized());
                             float distToLamp = vecToLamp.Magnitude();
+                            Vector3 dirToLamp = vecToLamp / distToLamp;
+
+                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp);
 
                             #region Geometry Intersections => closestShadowHit
                             foreach (var obj in scene.objects)
@@ -355,16 +365,18 @@ namespace Prismatix
                                 if (blocked) { break; }
                             }
                             #endregion
+
+                            #region Shade => image
                             if (!blocked)
                             {
-                                float dot = Utils.Dot(vecToLamp.Normalized(), closestHit.Value.normal);
+                                float dot = Utils.Dot(dirToLamp, closestHit.Value.normal);
                                 if (dot < 0) dot = 0;
                                 illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
                             }
                         }
-
                         float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
                         image.SetPixel(x, y, new Vector3(pixelLumen, pixelLumen, pixelLumen));
+                        #endregion
                     }
 
                     #endregion
@@ -397,6 +409,8 @@ namespace Prismatix
         public Vector3 right;
         public Vector3 origin;
         public Vector3 center;
+        public Vector3 horizontal;
+        public Vector3 vertical;
         public float vpHeight, vpWidth;
         #endregion
 
@@ -410,6 +424,8 @@ namespace Prismatix
 
             vpHeight = 2f * (float)SysMath.Tan(Config.fov / 2f);
             vpWidth = vpHeight * Config.aspectRatio;
+            horizontal = right * vpWidth;
+            vertical = up * vpHeight;
 
             center = position + forward; //origin is top left of viewplane
             origin = center - right*(vpWidth / 2f) - up*(vpHeight / 2f);
@@ -422,7 +438,7 @@ namespace Prismatix
             float u = (float)x / (Config.imgWidth -1);
             float v = (float)y / (Config.imgHeight -1);
 
-            Vector3 pixelVector = origin + right*(u*vpWidth) + up*(v*vpHeight);
+            Vector3 pixelVector = origin + u*horizontal + v*vertical;
             Vector3 rayDirection = (pixelVector - position).Normalized();
 
             return new Raycast(position, rayDirection);
@@ -440,4 +456,5 @@ namespace Prismatix
         }
         #endregion
     }
+
 }
