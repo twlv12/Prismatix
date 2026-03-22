@@ -3,6 +3,7 @@ using SysMath = System.Math; //fixing ambugiuity with own prismatix.math
 using Prismatix.Math;
 using Prismatix.Geometry;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace Prismatix
 {
@@ -120,20 +121,28 @@ namespace Prismatix
                     #region Geometry Intersections => closestHit
                     foreach (var obj in scene.objects)
                     {
+                        //Console.WriteLine($"NextObj Bounds: {obj.boundsMin},{obj.boundsMax}");
                         if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                            Console.WriteLine("Ray missed bounds. Early terminate.");
                             continue;
                         }
+                        //Console.WriteLine("Ray entered bounds. Now checking triangles.");
 
                         foreach (Triangle tri in obj.bakedTriangles)
                         {
+                            Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
+                            //Console.WriteLine($"CurrTri Center: {triCenter.x},{triCenter.y},{triCenter.z}");
+
                             HitInfo? hit = Utils.GetRayIntersect(ray, tri);
 
                             if (hit.HasValue){
                                 var hV = hit.Value;
+                                //Console.WriteLine("Hit");
                                 if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
                                     closestHit = hV;
                                 }
                             }
+                            //else { Console.WriteLine("No hit."); }
                         }
                     }
                     #endregion
@@ -154,10 +163,9 @@ namespace Prismatix
                         byte red = (byte)Utils.Remap(normal.x, -1, 1, 0, 255);
                         byte green = (byte)Utils.Remap(normal.y, -1, 1, 0, 255);
                         byte blue = (byte)Utils.Remap(normal.z, -1, 1, 0, 255);
-
+                    
                         image.SetPixel(x, y, new Vector3(red, green, blue));
                     }
-
                     
                     #endregion
                 }
@@ -182,6 +190,9 @@ namespace Prismatix
                     obj.CalculateBounds();
                 }
             }
+
+            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
+            Vector3 bgLight = new Vector3(Config.bgLight[0], Config.bgLight[1], Config.bgLight[2]);
             #endregion
 
             #region Main Rendering Loop => image
@@ -205,18 +216,15 @@ namespace Prismatix
 
                             if (hit.HasValue){
                                 var hV = hit.Value;
+                                hV.material = obj.material;
+
                                 if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
                                     closestHit = hV;
                                 }
-                                hV.material = obj.material;
                             }
                         }
                     }
                     #endregion
-
-                    #region Shadow Rays & Dot => image
-                    Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
-                    Vector3 bgLight = new Vector3(Config.bgLight[0], Config.bgLight[1], Config.bgLight[2]);
 
                     if (!closestHit.HasValue)
                     { //if no hit so background
@@ -224,6 +232,7 @@ namespace Prismatix
                         continue;
                     }
 
+                    #region Shadow Rays & Dot => image
                     float illumination = 0f;
                     if (closestHit.HasValue)
                     {
@@ -245,8 +254,7 @@ namespace Prismatix
                                     continue;
                                 }
 
-                                foreach (Triangle tri in obj.bakedTriangles)
-                                {
+                                foreach (Triangle tri in obj.bakedTriangles){
                                     HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, tri);
 
                                     if (shadowHit.HasValue && shadowHit.Value.distance < distToLamp){
@@ -254,7 +262,6 @@ namespace Prismatix
                                         break;
                                     }
                                 }
-
                                 if (blocked) { break; }
                             }
                             #endregion
@@ -327,13 +334,13 @@ namespace Prismatix
                     }
                     #endregion
 
-                    #region Shadow Rays & Dot => image
                     if (!closestHit.HasValue)
                     { //if no hit so background
                         image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
                         continue;
                     }
 
+                    #region Shadow Rays & Dot => image
                     float illumination = 0f;
                     if (closestHit.HasValue)
                     {
@@ -388,6 +395,23 @@ namespace Prismatix
         }
     }
 
+    public class BoundingVolume
+    {
+        public Vector3 boundsMin;
+        public Vector3 boundsMax;
+        public BoundingVolume left;
+        public BoundingVolume right;
+        public List<Triangle> triangles; //only populated for leaves
+
+        public BoundingVolume(List<Triangle> trisGiven)
+        {
+            //spatially order the list of triangles.
+            foreach (Triangle tri in trisGiven){
+                Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
+            }
+        }
+    }
+
     public class Raycast 
     {
         #region Raycast
@@ -419,8 +443,10 @@ namespace Prismatix
         {
             position = pos;
             forward = forwardDir.Normalized();
-            up = upDir.Normalized();
-            right = Utils.Cross(forward, up).Normalized();
+            right = Utils.Cross(upDir, forward).Normalized();
+
+            //recompute up to ensure its perpendicualar, caused the weird parallelogram effect
+            up = Utils.Cross(forward, right);
 
             vpHeight = 2f * (float)SysMath.Tan(Config.fov / 2f);
             vpWidth = vpHeight * Config.aspectRatio;
@@ -441,18 +467,41 @@ namespace Prismatix
             Vector3 pixelVector = origin + u*horizontal + v*vertical;
             Vector3 rayDirection = (pixelVector - position).Normalized();
 
+            //Console.WriteLine($"Forward: {forward}, RayDir: {rayDirection}");
+
             return new Raycast(position, rayDirection);
         }
 
         public void RotateTo(Vector3 target)
         {
+
             forward = (target - position).Normalized();
 
             right = Utils.Cross(forward, new Vector3(0, 0, 1)).Normalized();
             up = Utils.Cross(right, forward).Normalized();
 
             center = position + forward;
-            origin = center - right*(vpWidth / 2f) - up*(vpHeight / 2f);
+            origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
+
+            //CORRECT SOLUTION:
+            //forward = (target - position).Normalized();
+            //
+            //Vector3 worldUp = new Vector3(0,0,1);
+            //up = worldUp - forward*Utils.Dot(worldUp, forward);
+            //up = up.Normalized();
+            //
+            ////calc up
+            //
+            //right = Utils.Cross(up, forward).Normalized();
+            //
+            ////recompute up to ensure its perpendicualar, caused the weird parallelogram effect
+            //up = Utils.Cross(forward, right);
+            //
+            //horizontal = right * vpWidth;
+            //vertical = up * vpHeight;
+            //
+            //center = position + forward; //origin is top left of viewplane
+            //origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
         }
         #endregion
     }

@@ -180,11 +180,13 @@ namespace Prismatix.Math
             float distance = Dot(edgeAC, rayCrossVertAtoRay) * invDeterminent;
             if (distance < 0) { return null; } //ray goes away from triangle
 
+            if (Dot(ray.direction, trig.normal) > 0){
+                trig.normal = trig.normal * -1; }
+
             HitInfo hitInfo = new HitInfo();
             hitInfo.point = ray.origin + ray.direction * distance;
             hitInfo.normal = trig.normal;
             hitInfo.distance = distance;
-
             return hitInfo;
         }
 

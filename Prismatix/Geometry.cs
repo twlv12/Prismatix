@@ -14,10 +14,21 @@ namespace Prismatix.Geometry
         public Camera mainCamera;
 
         public void AddObject(Object obj){
-            objects.Add(obj);
-        }
+            objects.Add(obj); }
         public void AddLamp(Lamp lamp){
-            lamps.Add(lamp);
+            lamps.Add(lamp); }
+
+        public BoundingVolume BuildBVH()
+        {
+            List<Triangle> listOfAllTris = new List<Triangle>();
+            foreach (Object obj in objects){
+                foreach (Triangle tri in obj.bakedTriangles){
+                    listOfAllTris.Add(tri);
+                }
+            }
+
+            BoundingVolume volume = new BoundingVolume(listOfAllTris);
+            return volume;
         }
     }
 
@@ -57,9 +68,9 @@ namespace Prismatix.Geometry
         {
             int i = index * 3;
             return (
-                Utils.FormatVector(offset + vertices[indices[i]]),
-                Utils.FormatVector(offset + vertices[indices[i+1]]),
-                Utils.FormatVector(offset + vertices[indices[i+2]])
+                offset + vertices[indices[i]],
+                offset + vertices[indices[i+1]],
+                offset + vertices[indices[i+2]]
             );
         }
         #endregion
@@ -89,7 +100,9 @@ namespace Prismatix.Geometry
             bakedTriangles.Clear();
             for (int i = 0; i < mesh.indices.Count / 3; i++)
             {
+                //Console.WriteLine($"Baking Tri {i}");
                 var (a, b, c) = mesh.GetTri(i, position);
+                //Console.WriteLine($"Baked Tri {a},{b},{c}");
                 Vector3 normal = Utils.Cross(b-a, c-a).Normalized();
                 Vector3 edgeAB = b - a;
                 Vector3 edgeAC = c - a;

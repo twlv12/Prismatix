@@ -174,13 +174,16 @@ def drawInfo(screen):
         "",
         f"Selected: {selectedObj.name} ({selectedIndex})",
         f"Moving: {listeningForMovement}, Axis: {moving}",
-        f"X: {round(selectedObj.position.x,2)}, Y: {round(selectedObj.position.y,2)}, Z: {round(selectedObj.position.z,2)}",
         "",
+        f"X: {round(selectedObj.position.x,2)}, Y: {round(selectedObj.position.y,2)}, Z: {round(selectedObj.position.z,2)}",
         f"A: {round(angle,2)}, R: {round(radius,2)}, H: {round(height,1)}",
+        "",
+        f"Render Mode: {renderType}",
         f"Frametime: {frameTime}, FPS: {round(1/frameTime, 1)} (est)",
         f"Verts: {numVerts}, Tris: {numTris}",
         f"Frametime/Tris: {round(frameTime/numTris,5)}",
         "",
+        f"",
         "",
     ]
 
@@ -202,7 +205,7 @@ scene = Geo.Scene()
 #sphere1.name = "Sphere1"
 #sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
 
-cube1 = importObject("Suzanne")
+cube1 = importObject("Cube")
 scene.AddObject(cube1)
 cube1.name = "Cube1"
 cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
@@ -213,7 +216,7 @@ cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
 #cube2.material = Geo.Material("redShiny", PM.Vector3(0.2,0.1,1), 1, 0.1)
 #cube2.position = PM.Vector3(0,-3,0)
 
-camera = Camera(PM.Vector3(0,0,0), PM.Vector3(0,0,0), PM.Vector3(0,0,1))
+camera = Camera(PM.Vector3(0,0,0), PM.Vector3(1,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
 radius = 5
 
@@ -279,20 +282,20 @@ while running:
                 radius -= 1
             if event.key == pg.K_DOWN:
                 radius += 1
-            if event.key == pg.K_y:
+            if event.key == pg.K_u:
                 camHeight -= 1
-            if event.key == pg.K_h:
+            if event.key == pg.K_j:
                 camHeight += 1
             if event.key == pg.K_q:
                 focused = selectedObj.position
 
-            if event.key == pg.K_d:
+            if event.key == pg.K_1:
                 renderType = "depth"
-            if event.key == pg.K_n:
+            if event.key == pg.K_2:
                 renderType = "normal"
-            if event.key == pg.K_i:
+            if event.key == pg.K_3:
                 renderType = "diffuse"
-            if event.key == pg.K_f:
+            if event.key == pg.K_4:
                 renderType = "fastdiffuse"
 
             if event.key == pg.K_TAB:
