@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using SysMath = System.Math;
+using System.Diagnostics;
 
 namespace Prismatix.Geometry
 {
@@ -13,6 +14,10 @@ namespace Prismatix.Geometry
         public List<Lamp> lamps = new List<Lamp>();
         public Camera mainCamera;
         public BoundingVolume rootBVH;
+
+        public Scene(){
+            BuildBVH();
+        }
 
         public void AddObject(Object obj){
             obj.BakeAllTris();
@@ -30,7 +35,7 @@ namespace Prismatix.Geometry
                 }
             }
 
-            rootBVH = new BoundingVolume(listOfAllTris);
+            rootBVH = new BoundingVolume(listOfAllTris, 0);
         }
     }
 

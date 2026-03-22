@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<ProfilingTarget xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <StandaloneTarget>
+    <PythonInterpreter>
+      <Id>Global|PythonCore|3.11</Id>
+    </PythonInterpreter>
+    <WorkingDirectory>C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix</WorkingDirectory>
+    <Script>C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix\3DInterface.py</Script>
+    <Arguments />
+  </StandaloneTarget>
+  <Reports>
+    <Report>
+      <Filename>C:\Users\ethan\AppData\Local\Temp\Performance_20260322.vsp</Filename>
+    </Report>
+  </Reports>
+  <UseVTune>false</UseVTune>
+</ProfilingTarget>

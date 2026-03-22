@@ -10,7 +10,7 @@ def p(done=False):
 LocalPathToDLL = "bin/Debug/netstandard2.0/Prismatix.dll"
 #Imports & DLL Load
 #region
-print("Initializing Packages..."); c=0;m=11
+print("Initializing Packages..."); c=0;m=12
 
 import math; p()
 import clr; p() #pythonnet, NOT colored text thing
@@ -23,6 +23,7 @@ import pygame as pg; p()
 import math; p()
 import threading; p()
 from queue import Queue; p()
+import random as r
 import platform; p(done=True)
 
 print("\nArchitecture: ", platform.architecture())
@@ -44,6 +45,7 @@ import Prismatix.Geometry as Geo; p()
 
 Config.Load(str(Path(__file__).parent / "config.json")); p(done=True)
 frameTime = 10
+frameTimes = []
 #endregion
 
 
@@ -84,10 +86,12 @@ def renderArrayToImage(scene, renderMode): #add render modes heres
     frameTime1end = time.time()
     frameTime = round(frameTime1end-internalStartTime, 4)
     if frameTime == 0: frameTime = 1
+    frameTimes.append(frameTime)
+
     #print(f"{frameTime} | ", end="")
     return imgArray
 
-def worldToScreenCoords(point, camera):
+def worldToScreen(point):
     #transfer world coordinates to screen space
     relative = point - camera.position
 
@@ -106,16 +110,16 @@ def vectorToScreen(vector, camera):
     return (x*50, y*50)
 
 def drawAxis(surface, camera):
-    gridLines = 20
-    gridSpacing = 2
+    #gridLines = 20
+    #gridSpacing = 2
 
-    axis = { #vector and colour in tuple
+    axis = { #vector3 dir and (colour in tuple)
         "x": (PM.Vector3(1,0,0), (255,0,0)),
         "y": (PM.Vector3(0,1,0), (0,255,0)),
         "z": (PM.Vector3(0,0,1), (0,0,255)),
         }
+
     #gridAxis = {}
-    
     #region
     ##create grid lines
     #for i in range(-gridLines, gridLines+1):
@@ -140,7 +144,9 @@ def drawAxis(surface, camera):
     #                     (width//2 + negX*50, height//2 + negY*50),
     #                     (width//2 + posX*50, height//2 + posY*50), 1)
     #endregion
-                
+    
+    #Main Axis Draw
+    #region
     for axi, (vector, colour) in axis.items():
         #create a camera space vector for the axis
         cameraX = -PM.Utils.Dot(vector, camera.right)
@@ -159,13 +165,33 @@ def drawAxis(surface, camera):
             pg.draw.line(surface, colour, 
                          (width//2, height//2), 
                          (width//2 +cameraX*500, height//2 +cameraY*500), 1)
-    
-    objOrigin = worldToScreenCoords(selectedObj.position, camera)
+    #endregion
+
+    #Object Origin Draw
+    #region
+    objOrigin = worldToScreen(selectedObj.position)
     for axi, (vector, colour) in axis.items():
         #second rendering for object gizmos
         vectorX, vectorY = vectorToScreen(vector, camera)
         axisVector = (objOrigin[0]+vectorX, objOrigin[1]+vectorY)
         pg.draw.line(surface, colour, objOrigin, axisVector, 2)
+    #endregion
+    
+def averageFPS():
+    #horrible, i know.
+    try:
+        return 1/((frameTimes[-1]+frameTimes[-2]+frameTimes[-3]+frameTimes[-4])/4)
+    except:
+        try:
+            return 1/((frameTimes[-1]+frameTimes[-2]+frameTimes[-3])/3)
+        except:
+            try:
+                return 1/((frameTimes[-1]+frameTimes[-2])/2)
+            except:
+                try:
+                    return 1/frameTimes[-1]
+                except:
+                    return 0
 
 def drawInfo(screen):
     lines = [
@@ -175,6 +201,8 @@ def drawInfo(screen):
         "",
         "Left/Right arrow to orbit",
         "Up/Down arrow to zoom",
+        "U/J to move cam up/down",
+        "",
         "TAB to cycle selected",
         "Q to focus on selected",
         "G, x/y/z, -/+ to move object",
@@ -186,11 +214,14 @@ def drawInfo(screen):
         f"A: {round(angle,2)}, R: {round(radius,2)}, H: {round(height,1)}",
         "",
         f"Render Mode: {renderType}",
-        f"Frametime: {frameTime}, FPS: {round(1/frameTime, 1)} (est)",
+        f"Last: {frameTime}, FPS (avg4): {round(averageFPS(), 1)}",
         f"Verts: {numVerts}, Tris: {numTris}",
-        f"Frametime/Tris: {round(frameTime/numTris,5)}",
+        f"Last/Tris: {round(frameTime/numTris,5)}",
         "",
-        f"",
+        "Q - Toggle BVH overlay",
+        "",
+        "",
+        "",
         "",
     ]
 
@@ -200,11 +231,50 @@ def drawInfo(screen):
         screen.blit(surface, (x, y))
         y += surface.get_height()
 
-def countBVHLeaves(node):
+def traverseBVH(sf, node):
+    if node.depth == bvhDepth:
+        drawNodeOverlay(sf, node)
     if node.isLeaf:
         return len(node.triangles)
     else:
-        return countBVHLeaves(node.left) + countBVHLeaves(node.right)
+        return traverseBVH(sf, node.left) + traverseBVH(sf, node.right)
+
+def drawNodeOverlay(sf, node):
+    xmin = node.boundsMin.x
+    xmax = node.boundsMax.x
+    ymin = node.boundsMin.y
+    ymax = node.boundsMax.y
+    zmin = node.boundsMin.z
+    zmax = node.boundsMax.z
+
+    sV = [
+        worldToScreen(PM.Vector3(xmin, ymin, zmin)),
+        worldToScreen(PM.Vector3(xmax, ymin, zmin)),
+        worldToScreen(PM.Vector3(xmin, ymax, zmin)),
+        worldToScreen(PM.Vector3(xmax, ymax, zmin)),
+        worldToScreen(PM.Vector3(xmin, ymin, zmax)),
+        worldToScreen(PM.Vector3(xmax, ymin, zmax)),
+        worldToScreen(PM.Vector3(xmin, ymax, zmax)),
+        worldToScreen(PM.Vector3(xmax, ymax, zmax)),
+    ]
+
+    col = (
+    (hash(node) & 255),
+    (hash(node) >> 8) & 255,
+    (hash(node) >> 16) & 255 )
+
+    pg.draw.line(sf, col, sV[0], sV[1])
+    pg.draw.line(sf, col, sV[1], sV[3])
+    pg.draw.line(sf, col, sV[3], sV[2])
+    pg.draw.line(sf, col, sV[2], sV[0])
+    pg.draw.line(sf, col, sV[4], sV[5])
+    pg.draw.line(sf, col, sV[5], sV[7])
+    pg.draw.line(sf, col, sV[7], sV[6])
+    pg.draw.line(sf, col, sV[6], sV[4])
+    pg.draw.line(sf, col, sV[0], sV[4])
+    pg.draw.line(sf, col, sV[1], sV[5])
+    pg.draw.line(sf, col, sV[2], sV[6])
+    pg.draw.line(sf, col, sV[3], sV[7])
 
 
 #SCENE CONSTRUCTION --------------------------
@@ -214,23 +284,45 @@ scene = Geo.Scene()
 #cube1.name = "Cube1"
 #cube1.material = Geo.Material("orange", PM.Vector3(1,0.6,0.1), 1, 1)
 #scene.AddObject(cube1)
-
+#
 #cube2 = importObject("Cube.obj")
 #cube2.name = "Cube2"
 #cube2.material = Geo.Material("blue", PM.Vector3(0.2,0.1,1), 1, 1)
 #cube2.position = PM.Vector3(0,-3,0)
 #scene.AddObject(cube2)
-
+#
 #sphere1 = importObject("Sphere.obj")
 #sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 1)
 #scene.AddObject(sphere1)
+#
+#suzanne = importObject("Suzanne.obj")
+#suzanne.material = Geo.Material("purple", PM.Vector3(0.5,0.1,0.6), 1, 1)
+#scene.AddObject(suzanne)
+#
+#arch = importObject("Arch.obj")
+#arch.material = Geo.Material("blue", PM.Vector3(0.1,0.1,0.7), 1, 1)
+#scene.AddObject(arch)
+#
+fighter = importObject("Fighter.obj")
+fighter.material = Geo.Material("white", PM.Vector3(0.85,0.85,1), 1, 1)
+scene.AddObject(fighter)
+#
+#oven = importObject("Oven.obj")
+#oven.material = Geo.Material("red", PM.Vector3(0.85,0.2,0.1), 1, 1)
+#scene.AddObject(oven)
+#
+#Fan = importObject("Fan.obj")
+#Fan.material = Geo.Material("white", PM.Vector3(1,1,1), 1, 1)
+#scene.AddObject(Fan)
 
-suzanne = importObject("Suzanne.obj")
-suzanne.material = Geo.Material("yellow", PM.Vector3(0.8,0.8,0.1), 1, 1)
-scene.AddObject(suzanne)
 
-scene.BuildBVH()
-print(countBVHLeaves(scene.rootBVH))
+
+
+
+
+
+
+
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(1,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
@@ -272,6 +364,8 @@ listeningForMovement = False
 moving = None
 vector = PM.Vector3(0,0,0)
 focused = PM.Vector3(0,0,0)
+renderingBVH = False;
+bvhDepth = 0
 
 allSceneObjects = []
 for obj in scene.objects: allSceneObjects.append(obj)
@@ -286,6 +380,7 @@ print("\nReady!")
 #endregion
 
 while running:
+    #KEYBINDS
     for event in pg.event.get():
         if event.type == pg.QUIT:
             running = False
@@ -295,7 +390,8 @@ while running:
             if event.key == pg.K_RIGHT:
                 angle -= 0.2
             if event.key == pg.K_UP:
-                radius -= 1
+                if radius > 1:
+                    radius -= 1
             if event.key == pg.K_DOWN:
                 radius += 1
             if event.key == pg.K_u:
@@ -313,6 +409,12 @@ while running:
                 renderType = "diffuse"
             if event.key == pg.K_4:
                 renderType = "fastdiffuse"
+            if event.key == pg.K_b:
+                renderingBVH = not renderingBVH
+            if event.key == pg.K_LEFTBRACKET:
+                bvhDepth -= 1
+            if event.key == pg.K_RIGHTBRACKET:
+                bvhDepth += 1
 
             if event.key == pg.K_TAB:
                 selectedIndex = (selectedIndex +1) % len(allSceneObjects)
@@ -354,6 +456,8 @@ while running:
         sceen.blit(surface, (0,0))
         drawAxis(sceen, camera)
         drawInfo(sceen)
+        if renderingBVH:
+            traverseBVH(sceen, scene.rootBVH)
 
     pg.display.flip()
     clock.tick(60)

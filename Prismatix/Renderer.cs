@@ -27,7 +27,8 @@ namespace Prismatix
                 if (obj.needsPrecomp)
                 {
                     obj.BakeAllTris();
-                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
+                    scene.BuildBVH();
+                    obj.needsPrecomp = false;
                 }
             }
             #endregion
@@ -37,28 +38,7 @@ namespace Prismatix
             {   for (int x = 0; x < width; x++) //for every pixel...
                 {
                     Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = null;
-
-                    #region Geometry Intersections => closestHit
-                    foreach (var obj in scene.objects)
-                    {
-                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
-                            continue;
-                        }
-
-                        foreach (Triangle tri in obj.bakedTriangles) //for every tri...
-                        {
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
-
-                            if (hit.HasValue){
-                                var hV = hit.Value;
-                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
-                                    closestHit = hV;
-                                }
-                            }
-                        }
-                    }
-                    #endregion
+                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
 
                     #region Depth Logic => depthBuffer
                     float depth = -1;
@@ -103,11 +83,13 @@ namespace Prismatix
 
             //multiply by 3 to give 3 bytes for each RGB
             Image image = new Image(width, height);
+            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
 
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
+                    scene.BuildBVH();
+                    obj.needsPrecomp = false;
                 }
             }
             #endregion
@@ -119,38 +101,10 @@ namespace Prismatix
                     Raycast ray = scene.mainCamera.ShootRay(x, y);
                     HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
 
-                    #region Geometry Intersections => closestHit
-                    //foreach (var obj in scene.objects)
-                    //{
-                    //    //Console.WriteLine($"NextObj Bounds: {obj.boundsMin},{obj.boundsMax}");
-                    //    if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
-                    //        continue;
-                    //    }
-                    //    //Console.WriteLine("Ray entered bounds. Now checking triangles.");
-                    //
-                    //    foreach (Triangle tri in obj.bakedTriangles)
-                    //    {
-                    //        //Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
-                    //        //Console.WriteLine($"CurrTri Center: {triCenter.x},{triCenter.y},{triCenter.z}");
-                    //
-                    //        HitInfo? hit = Utils.GetRayIntersect(ray, tri);
-                    //
-                    //        if (hit.HasValue){
-                    //            var hV = hit.Value;
-                    //            //Console.WriteLine("Hit");
-                    //            if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
-                    //                closestHit = hV;
-                    //            }
-                    //        }
-                    //        //else { Console.WriteLine("No hit."); }
-                    //    }
-                    //}
-                    #endregion
-
                     #region Normal Logic => image
                     if (!closestHit.HasValue)
                     { //if no hit so background
-                        image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
+                        image.SetPixel(x, y, bgColour);
                         continue;
                     } //for some reason causes a crash when using an else statement below
                     //solved: the bg colour wasnt set in the config cs.
@@ -183,16 +137,16 @@ namespace Prismatix
 
             //multiply by 3 to give 3 bytes for each RGB
             Image image = new Image(width, height);
+            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
 
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
+                    scene.BuildBVH();
+                    obj.needsPrecomp = false;
                 }
             }
 
-            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
-            Vector3 bgLight = new Vector3(Config.bgLight[0], Config.bgLight[1], Config.bgLight[2]);
             #endregion
 
             #region Main Rendering Loop => image
@@ -201,30 +155,7 @@ namespace Prismatix
                 for (int x = 0; x < width; x++)
                 {
                     Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = null;
-
-                    #region Geometry Intersections => closestHit
-                    foreach (var obj in scene.objects)
-                    {
-                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
-                            continue;
-                        }
-
-                        foreach (Triangle tri in obj.bakedTriangles)
-                        {
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
-
-                            if (hit.HasValue){
-                                var hV = hit.Value;
-                                hV.material = obj.material;
-
-                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
-                                    closestHit = hV;
-                                }
-                            }
-                        }
-                    }
-                    #endregion
+                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
 
                     if (!closestHit.HasValue)
                     { //if no hit so background
@@ -241,31 +172,13 @@ namespace Prismatix
                         foreach (var lamp in scene.lamps)
                         {
                             Boolean blocked = false;
-                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
 
+                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
                             float distToLamp = vecToLamp.Magnitude();
                             Vector3 dirToLamp = vecToLamp/distToLamp;
 
-                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp); 
-
-                            #region Geometry Intersections => closestShadowHit
-                            foreach (var obj in scene.objects)
-                            {
-                                if (!Utils.GetRayHitsBounds(shadowRay, obj.boundsMin, obj.boundsMax)){
-                                    continue;
-                                }
-
-                                foreach (Triangle tri in obj.bakedTriangles){
-                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, tri);
-
-                                    if (shadowHit.HasValue && shadowHit.Value.distance < distToLamp){
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-                                if (blocked) { break; }
-                            }
-                            #endregion
+                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp);
+                            HitInfo? closestShadowHit = Utils.TraverseBVH(shadowRay, scene.rootBVH);
 
                             #region Shade => image
                             if (!blocked) {
@@ -275,8 +188,11 @@ namespace Prismatix
                             }
                         }
 
+                        Vector3 matCol = closestHit.Value.material.colour;
+                        Vector3 ambient = matCol * Config.ambientIntensity;
+
                         float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
-                        image.SetPixel(x, y, pixelLumen*closestHit.Value.material.colour +bgLight);
+                        image.SetPixel(x, y, pixelLumen*matCol +ambient);
                         #endregion
                     }
 
@@ -300,7 +216,8 @@ namespace Prismatix
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
+                    scene.BuildBVH();
+                    obj.needsPrecomp = false;
                 }
             }
             #endregion
@@ -311,29 +228,7 @@ namespace Prismatix
                 for (int x = 0; x < width-3; x+=3)
                 {
                     Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = null;
-
-                    #region Geometry Intersections => closestHit
-                    foreach (var obj in scene.objects)
-                    {
-
-                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
-                            continue;
-                        }
-
-                        foreach (Triangle tri in obj.bakedTriangles)
-                        {
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
-
-                            if (hit.HasValue){
-                                var hV = hit.Value;
-                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
-                                    closestHit = hV;
-                                }
-                            }
-                        }
-                    }
-                    #endregion
+                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
 
                     if (!closestHit.HasValue)
                     { //if no hit so background
@@ -355,24 +250,7 @@ namespace Prismatix
                             Vector3 dirToLamp = vecToLamp / distToLamp;
 
                             Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp);
-
-                            #region Geometry Intersections => closestShadowHit
-                            foreach (var obj in scene.objects)
-                            {
-                                foreach (Triangle tri in obj.bakedTriangles)
-                                {
-                                    HitInfo? shadowHit = Utils.GetRayIntersect(shadowRay, tri);
-
-                                    if (shadowHit.HasValue && shadowHit.Value.distance < distToLamp)
-                                    {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-
-                                if (blocked) { break; }
-                            }
-                            #endregion
+                            HitInfo? closestShadowHit = Utils.TraverseBVH(shadowRay, scene.rootBVH);
 
                             #region Shade => image
                             if (!blocked)
@@ -399,6 +277,7 @@ namespace Prismatix
     public class BoundingVolume
     {
         #region BVH Vars
+        public int depth;
         public Vector3 boundsMin;
         public Vector3 boundsMax;
         public BoundingVolume left;
@@ -408,9 +287,11 @@ namespace Prismatix
         public List<Triangle> triangles;
         #endregion
 
-        public BoundingVolume(List<Triangle> trisGiven)
+        public BoundingVolume(List<Triangle> trisGiven, int depth)
         {
-            #region Calulate BVH Bounds
+            #region Calulate BVH Bounds&Axis
+            this.depth = depth;
+
             (boundsMin, boundsMax) = Utils.CalculateBounds(trisGiven);
 
             //calculate longest axis to split and spatially sort tris by
@@ -424,7 +305,7 @@ namespace Prismatix
             else { longestAxis = "z"; }
             #endregion
 
-            #region Leaf or Parent?
+            #region Leaf || Parent?
             if (trisGiven.Count <= Config.triThreshold)
             {
                 isLeaf = true;
@@ -434,6 +315,7 @@ namespace Prismatix
             { 
                 isLeaf = false;
 
+                #region Split & Recurse
                 List<Triangle> trianglesToGive = new List<Triangle>();
                 if (longestAxis == "x"){
                     trianglesToGive = trisGiven.OrderBy(tri => tri.center.x).ToList();}
@@ -443,8 +325,9 @@ namespace Prismatix
                     trianglesToGive = trisGiven.OrderBy(tri => tri.center.z).ToList();}
 
                 int numTri = trianglesToGive.Count;
-                left = new BoundingVolume(trianglesToGive.GetRange (0       , numTri/2          ));
-                right = new BoundingVolume(trianglesToGive.GetRange(numTri/2, numTri-(numTri/2) ));
+                left = new BoundingVolume(trianglesToGive.GetRange (0       , numTri/2         ), depth+1);
+                right = new BoundingVolume(trianglesToGive.GetRange(numTri/2, numTri-(numTri/2)), depth+1);
+                #endregion
             }
             #endregion
         }

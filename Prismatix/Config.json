@@ -1,14 +1,13 @@
-
 {
   "imgWidth": 1024,
   "imgHeight": 1024,
   "fov": 60,
 
-  "samplesPerPixel": 1,
-  "maxBounces": 5,
-  "maxRayDepth": 100,
+  "samplesPerPixel": 1, 
+  "maxBounces": 5,      
+  "maxRayDepth": 100,   
   "triThreshold": 4,
 
   "bgColour": [ 0, 0, 50 ],
-  "bgLight":  [0, 0, 30]
+  "ambientIntensity": 0.5
 }

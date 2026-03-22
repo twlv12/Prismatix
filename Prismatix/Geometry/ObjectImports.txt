@@ -1,0 +1,22 @@
+cube1 = importObject("Cube.obj")
+cube1.name = "Cube1"
+cube1.material = Geo.Material("orange", PM.Vector3(1,0.6,0.1), 1, 1)
+scene.AddObject(cube1)
+
+cube2 = importObject("Cube.obj")
+cube2.name = "Cube2"
+cube2.material = Geo.Material("blue", PM.Vector3(0.2,0.1,1), 1, 1)
+cube2.position = PM.Vector3(0,-3,0)
+scene.AddObject(cube2)
+
+sphere1 = importObject("Sphere.obj")
+sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 1)
+scene.AddObject(sphere1)
+
+suzanne = importObject("Suzanne.obj")
+suzanne.material = Geo.Material("purple", PM.Vector3(0.5,0.1,0.6), 1, 1)
+scene.AddObject(suzanne)
+
+arch = importObject("Arch.obj")
+arch.material = Geo.Material("blue", PM.Vector3(0.1,0.1,0.7), 1, 1)
+scene.AddObject(arch)

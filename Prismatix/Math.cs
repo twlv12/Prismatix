@@ -177,15 +177,38 @@ namespace Prismatix.Math
             #region !Leaf => Traverse Lower
             else
             {
+                HitInfo? hitLeft = null;
+                HitInfo? hitRight = null;
+                HitInfo? closestHit = null;
+
                 if (GetRayHitsBounds(ray, node.left.boundsMin, node.left.boundsMax)) {
-                    return TraverseBVH(ray, node.left);
+                    hitLeft = TraverseBVH(ray, node.left);
                 }
-                else if (GetRayHitsBounds(ray, node.right.boundsMin, node.right.boundsMax)) {
-                    return TraverseBVH(ray, node.right);
+                if (GetRayHitsBounds(ray, node.right.boundsMin, node.right.boundsMax)) {
+                    hitRight = TraverseBVH(ray, node.right);
                 }
-                else {
-                    return null;
+
+                #region Compare L/R => closestHit
+                if (hitLeft.HasValue && hitRight.HasValue)
+                {
+                    if (hitLeft.Value.distance < hitRight.Value.distance){
+                        closestHit = hitLeft;
+                    }
+                    else{
+                        closestHit = hitRight;
+                    }
                 }
+
+                else if (hitLeft.HasValue && hitRight == null){
+                    closestHit = hitLeft;
+                }
+                else if (hitRight.HasValue && hitLeft == null) {
+                    closestHit = hitRight;
+                }
+                else { return null; }
+                #endregion
+
+                return closestHit;
             }
             #endregion
         }

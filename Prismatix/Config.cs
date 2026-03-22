@@ -20,7 +20,7 @@ namespace Prismatix
         public static float maxBounces { get; set; }
         public static float maxRayDepth { get; set; }
         public static int[] bgColour { get; set; }
-        public static int[] bgLight { get; set; }
+        public static float ambientIntensity { get; set; }
         public static int triThreshold { get; set; }
 
         public static void Load(string path)
@@ -38,7 +38,7 @@ namespace Prismatix
             maxBounces = config.maxBounces;
             maxRayDepth = config.maxRayDepth;
             bgColour = config.bgColour;
-            bgLight = config.bgLight;
+            ambientIntensity = config.ambientIntensity;
             triThreshold = config.triThreshold;
 
             Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fov}rad");
@@ -46,7 +46,7 @@ namespace Prismatix
 
         private class ConfigData
         { //temporary struct to hold data from json
-            //as cant directly deserialize to main config class
+            //cant directly deserialize to main config class
             public int imgWidth { get; set; }
             public int imgHeight { get; set; }
             public float aspectRatio { get; set; }
@@ -55,7 +55,7 @@ namespace Prismatix
             public float maxBounces { get; set; }
             public float maxRayDepth { get; set; }
             public int[] bgColour { get; set; }
-            public int[] bgLight { get; set; }
+            public float ambientIntensity { get; set; }
             public int triThreshold { get; set; }
         }
     }
