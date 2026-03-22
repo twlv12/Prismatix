@@ -43,16 +43,21 @@ import Prismatix.Math as PM; p()
 import Prismatix.Geometry as Geo; p()
 
 Config.Load(str(Path(__file__).parent / "config.json")); p(done=True)
+frameTime = 10
 #endregion
 
 
 
 def importObject(fileName, name="UNDEFINED"):
     obj = Geo.Object(name, PM.Vector3(0,0,0), 1)
-    obj.LoadFromDisk(str(Path(__file__).parent / f"Geometry/{fileName}.obj"))
+    try:
+        obj.LoadFromDisk(str(Path(__file__).parent / f"Geometry/{fileName}"))
+    except:
+        print(f"Object {fileName} not found.")
+
     print(f"Loaded {obj.name} from disk.")
     return obj
-frameTime = 10
+
 def renderArrayToImage(scene, renderMode): #add render modes heres
     internalStartTime = time.time()
     global renderType
@@ -65,7 +70,7 @@ def renderArrayToImage(scene, renderMode): #add render modes heres
     elif renderMode == "fastdiffuse":
         byteArrayData = Renderer.RenderDiffuseFast(scene).data
     else:
-       print("No render mode selected! Defaulting to normal.")
+       print("No render mode selected, defaulting to normal.")
        renderMode, renderType = "normal", "normal"
        byteArrayData = Renderer.RenderNormal(scene).data
     
@@ -164,8 +169,10 @@ def drawAxis(surface, camera):
 
 def drawInfo(screen):
     lines = [
-        "N: normal, D: depth, I: diffuse, F: fastdiffuse",
-        "Left/Right arrow to orbit",
+        "1: depth, 2: normal", 
+        "3: diffuse, 4: fastdiffuse",
+        "",
+        "",
         "Left/Right arrow to orbit",
         "Up/Down arrow to zoom",
         "TAB to cycle selected",
@@ -193,28 +200,37 @@ def drawInfo(screen):
         screen.blit(surface, (x, y))
         y += surface.get_height()
 
+def countBVHLeaves(node):
+    if node.isLeaf:
+        return len(node.triangles)
+    else:
+        return countBVHLeaves(node.left) + countBVHLeaves(node.right)
 
 
 #SCENE CONSTRUCTION --------------------------
 scene = Geo.Scene()
 
+#cube1 = importObject("Cube.obj")
+#cube1.name = "Cube1"
+#cube1.material = Geo.Material("orange", PM.Vector3(1,0.6,0.1), 1, 1)
+#scene.AddObject(cube1)
 
-
-#sphere1 = importObject("Sphere")
-#scene.AddObject(sphere1)
-#sphere1.name = "Sphere1"
-#sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
-
-cube1 = importObject("Cube")
-scene.AddObject(cube1)
-cube1.name = "Cube1"
-cube1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 0.9)
-
-#cube2 = importObject("Cube")
-#scene.AddObject(cube2)
+#cube2 = importObject("Cube.obj")
 #cube2.name = "Cube2"
-#cube2.material = Geo.Material("redShiny", PM.Vector3(0.2,0.1,1), 1, 0.1)
+#cube2.material = Geo.Material("blue", PM.Vector3(0.2,0.1,1), 1, 1)
 #cube2.position = PM.Vector3(0,-3,0)
+#scene.AddObject(cube2)
+
+#sphere1 = importObject("Sphere.obj")
+#sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 1)
+#scene.AddObject(sphere1)
+
+suzanne = importObject("Suzanne.obj")
+suzanne.material = Geo.Material("yellow", PM.Vector3(0.8,0.8,0.1), 1, 1)
+scene.AddObject(suzanne)
+
+scene.BuildBVH()
+print(countBVHLeaves(scene.rootBVH))
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(1,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
@@ -250,7 +266,7 @@ print(f"Vertices: {numVerts}, Triangles: {numTris}")
 running = True
 rendering = True
 surface = None
-angle = 0
+angle = -2.4
 camHeight = -3
 listeningForMovement = False
 moving = None
@@ -266,7 +282,7 @@ selectedIndex = 0
 selectedObj = allSceneObjects[selectedIndex]
 
 drawInfo(sceen)
-print("Ready!")
+print("\nReady!")
 #endregion
 
 while running:
@@ -275,9 +291,9 @@ while running:
             running = False
         if event.type == pg.KEYDOWN:
             if event.key == pg.K_LEFT:
-                angle -= 0.2
-            if event.key == pg.K_RIGHT:
                 angle += 0.2
+            if event.key == pg.K_RIGHT:
+                angle -= 0.2
             if event.key == pg.K_UP:
                 radius -= 1
             if event.key == pg.K_DOWN:

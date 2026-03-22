@@ -12,13 +12,16 @@ namespace Prismatix.Geometry
         public List<Object> objects = new List<Object>();
         public List<Lamp> lamps = new List<Lamp>();
         public Camera mainCamera;
+        public BoundingVolume rootBVH;
 
         public void AddObject(Object obj){
-            objects.Add(obj); }
+            obj.BakeAllTris();
+            objects.Add(obj); 
+        }
         public void AddLamp(Lamp lamp){
             lamps.Add(lamp); }
 
-        public BoundingVolume BuildBVH()
+        public void BuildBVH()
         {
             List<Triangle> listOfAllTris = new List<Triangle>();
             foreach (Object obj in objects){
@@ -27,8 +30,7 @@ namespace Prismatix.Geometry
                 }
             }
 
-            BoundingVolume volume = new BoundingVolume(listOfAllTris);
-            return volume;
+            rootBVH = new BoundingVolume(listOfAllTris);
         }
     }
 
@@ -64,6 +66,9 @@ namespace Prismatix.Geometry
         //}
 
         //sad forgotten function :(..... NOT ANYMORE!!!
+
+        #endregion
+
         public (Vector3, Vector3, Vector3) GetTri(int index, Vector3 offset)
         {
             int i = index * 3;
@@ -73,7 +78,6 @@ namespace Prismatix.Geometry
                 offset + vertices[indices[i+2]]
             );
         }
-        #endregion
     }
 
     public class Object
@@ -106,34 +110,18 @@ namespace Prismatix.Geometry
                 Vector3 normal = Utils.Cross(b-a, c-a).Normalized();
                 Vector3 edgeAB = b - a;
                 Vector3 edgeAC = c - a;
+                Vector3 center = (a + b + c) / 3;
 
-                bakedTriangles.Add(new Triangle { a=a, b=b, c=c, normal=normal, edgeAB=edgeAB, edgeAC=edgeAC });
+                bakedTriangles.Add(new Triangle { 
+                    a=a, b=b, c=c, 
+                    normal=normal, 
+                    edgeAB=edgeAB, edgeAC=edgeAC, 
+                    center=center,
+                    hostObj=this,
+                });
             }
-            needsPrecomp = false;
         }
-
-        public void CalculateBounds()
-        {
-            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-
-            foreach (var tri in bakedTriangles)
-            {
-                min = Utils.Min(tri.a, min);
-                min = Utils.Min(tri.b, min);
-                min = Utils.Min(tri.c, min);
-
-                max = Utils.Max(tri.a, max);
-                max = Utils.Max(tri.b, max);
-                max = Utils.Max(tri.c, max);
-            }
-
-            boundsMin = min;
-            boundsMax = max;
-        }
-
-        #region Mesh Loading
-        //loads a mesh from .obj including name
+        //only accepts .obj files for now
         public void LoadFromDisk(string filePath)
         {
             mesh = new Mesh();
@@ -147,7 +135,7 @@ namespace Prismatix.Geometry
 
                 #region Check Line Types
                 if (cleanLine.StartsWith("o") || cleanLine.StartsWith("g")) {
-                    name = cleanLine.Substring(2); 
+                    name = $"Unnamed{cleanLine.Substring(2)}"; 
                 }
 
                 else if (cleanLine.StartsWith("v ") && !cleanLine.StartsWith("vn")) {
@@ -176,8 +164,8 @@ namespace Prismatix.Geometry
 
                 //Console.WriteLine($"Loaded {mesh.vertices.Count} vertices & {mesh.indices.Count / 3} triangles");
             }
+            BakeAllTris();
         }
-        #endregion
     }
 
     public class Material

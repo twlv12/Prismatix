@@ -1,7 +1,8 @@
-using System;
-using System.Collections;
 using Prismatix;
 using Prismatix.Geometry;
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using SysMath = System.Math;
 
 namespace Prismatix.Math
@@ -59,6 +60,8 @@ namespace Prismatix.Math
         public Vector3 edgeAB;
         public Vector3 edgeAC;
         public Vector3 normal;
+        public Vector3 center;
+        public Geometry.Object hostObj;
     }
 
     public class Image
@@ -98,25 +101,25 @@ namespace Prismatix.Math
     {
         #region Boring Math Functions
         //gives the 2d vector perpendicular to the two input vectors 
-        public static Vector3 Cross(Vector3 a, Vector3 b){
+        public static Vector3 Cross(Vector3 a, Vector3 b) {
             return new Vector3(
-            a.y*b.z - a.z*b.y,
-            a.z*b.x - a.x*b.z,
-            a.x*b.y - a.y*b.x
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x
             );
         }
-        public static float Dot(Vector3 a, Vector3 b){
-            return a.x*b.x + a.y*b.y + a.z*b.z;
+        public static float Dot(Vector3 a, Vector3 b) {
+            return a.x * b.x + a.y * b.y + a.z * b.z;
         }
-        public static float Remap(float value, float inMin, float inMax, float outMin, float outMax){
+        public static float Remap(float value, float inMin, float inMax, float outMin, float outMax) {
             return outMin + (value - inMin) * (outMax - outMin) / (inMax - inMin);
         }
-        public static float Clamp(float value, float min, float max){
-            if (value < min) {  value = min; }
-            if (value > max) { value = max; } 
+        public static float Clamp(float value, float min, float max) {
+            if (value < min) { value = min; }
+            if (value > max) { value = max; }
             return value;
         }
-        public static Vector3 Min(Vector3 a, Vector3 b){
+        public static Vector3 Min(Vector3 a, Vector3 b) {
             Vector3 result = new Vector3();
             if (a.x < b.x) { result.x = a.x; }
             else { result.x = b.x; }
@@ -126,7 +129,7 @@ namespace Prismatix.Math
             else { result.z = b.z; }
             return result;
         }
-        public static Vector3 Max(Vector3 a, Vector3 b){
+        public static Vector3 Max(Vector3 a, Vector3 b) {
             Vector3 result = new Vector3();
             if (a.x < b.x) { result.x = b.x; }
             else { result.x = a.x; }
@@ -137,12 +140,74 @@ namespace Prismatix.Math
             return result;
         }
         public static Vector3 FormatVector(Vector3 a)
-        {
+        { //old function used to remap blender's default coordinate
+            //system to mine, but ended up just doing a blender-side fix
             return new Vector3(a.x, a.z, -a.y);
+        }
+        public static Vector3 GetTriCenter(Triangle tri) {
+            return (tri.a + tri.b + tri.c) / 3;
         }
         #endregion
 
         #region Cool Math Functions
+        public static HitInfo? TraverseBVH(Raycast ray, BoundingVolume node)
+        {
+            #region Leaf => Tri Intersection
+            if (node.isLeaf)
+            {
+                HitInfo? closestHit = null;
+
+                foreach (Triangle tri in node.triangles)
+                {
+                    HitInfo? hit = GetRayIntersect(ray, tri);
+                    if (hit.HasValue) {
+                        var hV = hit.Value;
+                        hV.material = tri.hostObj.material;
+
+                        if (!closestHit.HasValue || hV.distance < closestHit.Value.distance)
+                        {
+                            closestHit = hV;
+                        }
+                    }
+                }
+                return closestHit;
+            }
+            #endregion
+
+            #region !Leaf => Traverse Lower
+            else
+            {
+                if (GetRayHitsBounds(ray, node.left.boundsMin, node.left.boundsMax)) {
+                    return TraverseBVH(ray, node.left);
+                }
+                else if (GetRayHitsBounds(ray, node.right.boundsMin, node.right.boundsMax)) {
+                    return TraverseBVH(ray, node.right);
+                }
+                else {
+                    return null;
+                }
+            }
+            #endregion
+        }
+
+        public static (Vector3, Vector3) CalculateBounds(List<Triangle> trisToBound)
+        {
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            foreach (var tri in trisToBound) {
+                min = Utils.Min(tri.a, min);
+                min = Utils.Min(tri.b, min);
+                min = Utils.Min(tri.c, min);
+
+                max = Utils.Max(tri.a, max);
+                max = Utils.Max(tri.b, max);
+                max = Utils.Max(tri.c, max);
+            }
+
+            return (min, max);
+        }
+
         public static HitInfo? GetRayIntersect(Raycast ray, Triangle trig)
         {
             //using Moller-Trumbore algorithm
@@ -180,7 +245,7 @@ namespace Prismatix.Math
             float distance = Dot(edgeAC, rayCrossVertAtoRay) * invDeterminent;
             if (distance < 0) { return null; } //ray goes away from triangle
 
-            if (Dot(ray.direction, trig.normal) > 0){
+            if (Dot(ray.direction, trig.normal) > 0) {
                 trig.normal = trig.normal * -1; }
 
             HitInfo hitInfo = new HitInfo();
@@ -193,32 +258,32 @@ namespace Prismatix.Math
         public static bool GetRayHitsBounds(Raycast ray, Vector3 min, Vector3 max)
         {
             //t representing time along the ray
-            float tEnterX = (min.x -ray.origin.x) /ray.direction.x;
-            float tExitX = (max.x -ray.origin.x) /ray.direction.x;
+            float tEnterX = (min.x - ray.origin.x) / ray.direction.x;
+            float tExitX = (max.x - ray.origin.x) / ray.direction.x;
 
-            if (tEnterX> tExitX){ //flip so enter is larger
+            if (tEnterX > tExitX) { //flip so enter is larger
                 float temp = tEnterX;
                 tEnterX = tExitX;
                 tExitX = temp;
             }
 
-            float tEnterY = (min.y -ray.origin.y) /ray.direction.y;
-            float tExitY = (max.y -ray.origin.y) /ray.direction.y;
+            float tEnterY = (min.y - ray.origin.y) / ray.direction.y;
+            float tExitY = (max.y - ray.origin.y) / ray.direction.y;
 
-            if (tEnterY> tExitY){
+            if (tEnterY > tExitY) {
                 float temp = tEnterY;
                 tEnterY = tExitY;
                 tExitY = temp;
             }
 
-            if (tEnterX> tExitY || tEnterY> tExitX)
+            if (tEnterX > tExitY || tEnterY > tExitX)
                 return false;
 
             float tEnter = SysMath.Max(tEnterX, tEnterY);
             float tExit = SysMath.Min(tExitX, tExitY);
 
-            float tEnterZ = (min.z - ray.origin.z) /ray.direction.z;
-            float tExitZ = (max.z - ray.origin.z) /ray.direction.z;
+            float tEnterZ = (min.z - ray.origin.z) / ray.direction.z;
+            float tExitZ = (max.z - ray.origin.z) / ray.direction.z;
 
             if (tEnterZ > tExitZ)
             {

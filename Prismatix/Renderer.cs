@@ -4,6 +4,7 @@ using Prismatix.Math;
 using Prismatix.Geometry;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Prismatix
 {
@@ -26,7 +27,7 @@ namespace Prismatix
                 if (obj.needsPrecomp)
                 {
                     obj.BakeAllTris();
-                    obj.CalculateBounds();
+                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
                 }
             }
             #endregion
@@ -106,7 +107,7 @@ namespace Prismatix
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    obj.CalculateBounds();
+                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
                 }
             }
             #endregion
@@ -116,35 +117,34 @@ namespace Prismatix
             {   for (int x = 0; x < width; x++)
                 {
                     Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = null;
+                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
 
                     #region Geometry Intersections => closestHit
-                    foreach (var obj in scene.objects)
-                    {
-                        //Console.WriteLine($"NextObj Bounds: {obj.boundsMin},{obj.boundsMax}");
-                        if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
-                            Console.WriteLine("Ray missed bounds. Early terminate.");
-                            continue;
-                        }
-                        //Console.WriteLine("Ray entered bounds. Now checking triangles.");
-
-                        foreach (Triangle tri in obj.bakedTriangles)
-                        {
-                            Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
-                            //Console.WriteLine($"CurrTri Center: {triCenter.x},{triCenter.y},{triCenter.z}");
-
-                            HitInfo? hit = Utils.GetRayIntersect(ray, tri);
-
-                            if (hit.HasValue){
-                                var hV = hit.Value;
-                                //Console.WriteLine("Hit");
-                                if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
-                                    closestHit = hV;
-                                }
-                            }
-                            //else { Console.WriteLine("No hit."); }
-                        }
-                    }
+                    //foreach (var obj in scene.objects)
+                    //{
+                    //    //Console.WriteLine($"NextObj Bounds: {obj.boundsMin},{obj.boundsMax}");
+                    //    if (!Utils.GetRayHitsBounds(ray, obj.boundsMin, obj.boundsMax)){
+                    //        continue;
+                    //    }
+                    //    //Console.WriteLine("Ray entered bounds. Now checking triangles.");
+                    //
+                    //    foreach (Triangle tri in obj.bakedTriangles)
+                    //    {
+                    //        //Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
+                    //        //Console.WriteLine($"CurrTri Center: {triCenter.x},{triCenter.y},{triCenter.z}");
+                    //
+                    //        HitInfo? hit = Utils.GetRayIntersect(ray, tri);
+                    //
+                    //        if (hit.HasValue){
+                    //            var hV = hit.Value;
+                    //            //Console.WriteLine("Hit");
+                    //            if (!closestHit.HasValue || hV.distance < closestHit.Value.distance){
+                    //                closestHit = hV;
+                    //            }
+                    //        }
+                    //        //else { Console.WriteLine("No hit."); }
+                    //    }
+                    //}
                     #endregion
 
                     #region Normal Logic => image
@@ -187,7 +187,7 @@ namespace Prismatix
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    obj.CalculateBounds();
+                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
                 }
             }
 
@@ -234,13 +234,14 @@ namespace Prismatix
 
                     #region Shadow Rays & Dot => image
                     float illumination = 0f;
+                    Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
+
                     if (closestHit.HasValue)
                     {
                         foreach (var lamp in scene.lamps)
                         {
                             Boolean blocked = false;
                             Vector3 vecToLamp = lamp.position - closestHit.Value.point;
-                            Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
 
                             float distToLamp = vecToLamp.Magnitude();
                             Vector3 dirToLamp = vecToLamp/distToLamp;
@@ -299,7 +300,7 @@ namespace Prismatix
             foreach (var obj in scene.objects){
                 if (obj.needsPrecomp){
                     obj.BakeAllTris();
-                    obj.CalculateBounds();
+                    (obj.boundsMin, obj.boundsMax) = Utils.CalculateBounds(obj.bakedTriangles);
                 }
             }
             #endregion
@@ -397,18 +398,55 @@ namespace Prismatix
 
     public class BoundingVolume
     {
+        #region BVH Vars
         public Vector3 boundsMin;
         public Vector3 boundsMax;
         public BoundingVolume left;
         public BoundingVolume right;
-        public List<Triangle> triangles; //only populated for leaves
+        public Boolean isLeaf;
+        public string longestAxis;
+        public List<Triangle> triangles;
+        #endregion
 
         public BoundingVolume(List<Triangle> trisGiven)
         {
-            //spatially order the list of triangles.
-            foreach (Triangle tri in trisGiven){
-                Vector3 triCenter = (tri.a + tri.b + tri.c) / 3;
+            #region Calulate BVH Bounds
+            (boundsMin, boundsMax) = Utils.CalculateBounds(trisGiven);
+
+            //calculate longest axis to split and spatially sort tris by
+            float xSize = boundsMax.x - boundsMin.x;
+            float ySize = boundsMax.y - boundsMin.y;
+            float zSize = boundsMax.z - boundsMin.z;
+
+            longestAxis = "x";
+            if (xSize >= ySize && xSize >= zSize) { longestAxis = "x"; }
+            else if (ySize >= zSize ) { longestAxis = "y"; }
+            else { longestAxis = "z"; }
+            #endregion
+
+            #region Leaf or Parent?
+            if (trisGiven.Count <= Config.triThreshold)
+            {
+                isLeaf = true;
+                triangles = trisGiven;
             }
+            else
+            { 
+                isLeaf = false;
+
+                List<Triangle> trianglesToGive = new List<Triangle>();
+                if (longestAxis == "x"){
+                    trianglesToGive = trisGiven.OrderBy(tri => tri.center.x).ToList();}
+                if (longestAxis == "y"){
+                    trianglesToGive = trisGiven.OrderBy(tri => tri.center.y).ToList();}
+                if (longestAxis == "z"){
+                    trianglesToGive = trisGiven.OrderBy(tri => tri.center.z).ToList();}
+
+                int numTri = trianglesToGive.Count;
+                left = new BoundingVolume(trianglesToGive.GetRange (0       , numTri/2          ));
+                right = new BoundingVolume(trianglesToGive.GetRange(numTri/2, numTri-(numTri/2) ));
+            }
+            #endregion
         }
     }
 
@@ -438,7 +476,7 @@ namespace Prismatix
         public float vpHeight, vpWidth;
         #endregion
 
-        #region Boring Camera Stuff
+        #region Camera Methods (Vector Hell)
         public Camera(Vector3 pos, Vector3 forwardDir, Vector3 upDir)
         {
             position = pos;
@@ -474,34 +512,24 @@ namespace Prismatix
 
         public void RotateTo(Vector3 target)
         {
-
             forward = (target - position).Normalized();
-
-            right = Utils.Cross(forward, new Vector3(0, 0, 1)).Normalized();
-            up = Utils.Cross(right, forward).Normalized();
-
-            center = position + forward;
+            
+            Vector3 worldUp = new Vector3(0,0,1);
+            up = worldUp - forward*Utils.Dot(worldUp, forward);
+            up = up.Normalized();
+            
+            //calc up
+            
+            right = Utils.Cross(up, forward).Normalized();
+            
+            //recompute up to ensure its perpendicualar, caused the weird parallelogram effect
+            up = Utils.Cross(forward, right);
+            
+            horizontal = right * vpWidth;
+            vertical = up * vpHeight;
+            
+            center = position + forward; //origin is top left of viewplane
             origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
-
-            //CORRECT SOLUTION:
-            //forward = (target - position).Normalized();
-            //
-            //Vector3 worldUp = new Vector3(0,0,1);
-            //up = worldUp - forward*Utils.Dot(worldUp, forward);
-            //up = up.Normalized();
-            //
-            ////calc up
-            //
-            //right = Utils.Cross(up, forward).Normalized();
-            //
-            ////recompute up to ensure its perpendicualar, caused the weird parallelogram effect
-            //up = Utils.Cross(forward, right);
-            //
-            //horizontal = right * vpWidth;
-            //vertical = up * vpHeight;
-            //
-            //center = position + forward; //origin is top left of viewplane
-            //origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
         }
         #endregion
     }

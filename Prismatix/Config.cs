@@ -7,8 +7,9 @@ namespace Prismatix
 {
     //this is a short intermediate utility to load the data from the json
     //so that i dont have to rebuild every time to change the config
+    //STILL NEED TO REBUILD WHEN ADDING NEW FIELD
 
-//MAKE SURE TO ADD ALL FOUR REFS FOR ANY NEW CONFIG VAR
+//MAKE SURE TO ADD ALL FOUR REFS FOR ANY NEW CONFIG VAR & REBUILD
     public static class Config
     {
         public static int imgWidth { get; set; }
@@ -20,6 +21,7 @@ namespace Prismatix
         public static float maxRayDepth { get; set; }
         public static int[] bgColour { get; set; }
         public static int[] bgLight { get; set; }
+        public static int triThreshold { get; set; }
 
         public static void Load(string path)
         {
@@ -37,12 +39,14 @@ namespace Prismatix
             maxRayDepth = config.maxRayDepth;
             bgColour = config.bgColour;
             bgLight = config.bgLight;
+            triThreshold = config.triThreshold;
 
             Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fov}rad");
         }
 
         private class ConfigData
         { //temporary struct to hold data from json
+            //as cant directly deserialize to main config class
             public int imgWidth { get; set; }
             public int imgHeight { get; set; }
             public float aspectRatio { get; set; }
@@ -52,6 +56,7 @@ namespace Prismatix
             public float maxRayDepth { get; set; }
             public int[] bgColour { get; set; }
             public int[] bgLight { get; set; }
+            public int triThreshold { get; set; }
         }
     }
 }
