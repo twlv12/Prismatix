@@ -218,8 +218,8 @@ def drawInfo(screen):
         f"Verts: {numVerts}, Tris: {numTris}",
         f"Last/Tris: {round(frameTime/numTris,5)}",
         "",
-        "Q - Toggle BVH overlay",
-        "",
+        "B - Toggle BVH overlay",
+        f"BVH: {renderingBVH}, Depth: {bvhDepth}",
         "",
         "",
         "",
@@ -291,21 +291,21 @@ scene = Geo.Scene()
 #cube2.position = PM.Vector3(0,-3,0)
 #scene.AddObject(cube2)
 #
-#sphere1 = importObject("Sphere.obj")
+#sphere1 = importObject("SuperSphere.obj")
 #sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 1)
 #scene.AddObject(sphere1)
 #
-#suzanne = importObject("Suzanne.obj")
-#suzanne.material = Geo.Material("purple", PM.Vector3(0.5,0.1,0.6), 1, 1)
-#scene.AddObject(suzanne)
+suzanne = importObject("Suzanne.obj")
+suzanne.material = Geo.Material("purple", PM.Vector3(0.5,0.1,0.6), 1, 1)
+scene.AddObject(suzanne)
 #
 #arch = importObject("Arch.obj")
 #arch.material = Geo.Material("blue", PM.Vector3(0.1,0.1,0.7), 1, 1)
 #scene.AddObject(arch)
 #
-fighter = importObject("Fighter.obj")
-fighter.material = Geo.Material("white", PM.Vector3(0.85,0.85,1), 1, 1)
-scene.AddObject(fighter)
+#fighter = importObject("Fighter.obj")
+#fighter.material = Geo.Material("white", PM.Vector3(0.85,0.85,1), 1, 1)
+#scene.AddObject(fighter)
 #
 #oven = importObject("Oven.obj")
 #oven.material = Geo.Material("red", PM.Vector3(0.85,0.2,0.1), 1, 1)
@@ -314,15 +314,6 @@ scene.AddObject(fighter)
 #Fan = importObject("Fan.obj")
 #Fan.material = Geo.Material("white", PM.Vector3(1,1,1), 1, 1)
 #scene.AddObject(Fan)
-
-
-
-
-
-
-
-
-
 
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(1,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
@@ -345,7 +336,7 @@ height = Config.imgHeight
 sceen = pg.display.set_mode((width, height))
 pg.display.set_caption("Prismatix")
 clock = pg.time.Clock()
-font = pg.font.Font(r"C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix\font.ttf", 16)
+font = pg.font.Font(str(Path(__file__).parent / "font.ttf"), 16)
 print("Screen OK...")
 
 numVerts = 0

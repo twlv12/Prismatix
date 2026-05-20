@@ -1,6 +1,6 @@
 {
-  "imgWidth": 1024,
-  "imgHeight": 1024,
+  "imgWidth": 864,
+  "imgHeight": 864,
   "fov": 60,
 
   "samplesPerPixel": 1, 
