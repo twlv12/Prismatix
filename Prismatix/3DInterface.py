@@ -1,3 +1,11 @@
+def show_exception_and_exit(exc_type, exc_value, tb):
+   import traceback
+   traceback.print_exception(exc_type, exc_value, tb)
+   input("Press key to exit.")
+   sys.exit(-1)
+import sys
+sys.excepthook = show_exception_and_exit
+
 import os
 def p(done=False):
     global c
@@ -7,18 +15,19 @@ def p(done=False):
     c += 1
     #if done: os.system('cls')
 
-LocalPathToDLL = "bin/Debug/netstandard2.0/Prismatix.dll"
+LocalPathToDLL = "bin/Debug/net8.0/Prismatix.dll"
 #Imports & DLL Load
 #region
-print("Initializing Packages..."); c=0;m=12
+print("Initializing Packages..."); c=0;m=11
 
 import math; p()
-import clr; p() #pythonnet, NOT colored text thing
+from pythonnet import load
+load("coreclr") #force using newer pythonnet for net8.0
+import clr; p() #pythonnet, NOT coloured text thing
 from pathlib import Path; p()
 import time; p()
 from PIL import Image; p()
 import numpy as np; p()
-import sys; p()
 import pygame as pg; p()
 import math; p()
 import threading; p()
@@ -36,7 +45,8 @@ if dllPath.exists() == False:
     exit()
 print(dllPath)
 
-clr.AddReference(str(dllPath)); p() #create a python lib to import
+sys.path.append(str(dllPath.parent))
+clr.AddReference("Prismatix"); p() #create a python lib to import
 from Prismatix import Renderer; p()
 from Prismatix import Camera; p()
 from Prismatix import Config; p()
@@ -49,32 +59,31 @@ frameTimes = []
 #endregion
 
 
-
-def importObject(fileName, name="UNDEFINED"):
-    obj = Geo.Object(name, PM.Vector3(0,0,0), 1)
+def importObject(fileName, name="Unnamed", scale=1.0):
+    path = str(Path(__file__).parent / f"Geometry/{fileName}")
     try:
-        obj.LoadFromDisk(str(Path(__file__).parent / f"Geometry/{fileName}"))
-    except:
-        print(f"Object {fileName} not found.")
-
-    print(f"Loaded {obj.name} from disk.")
-    return obj
+        obj = Geo.MeshLib.NewObj(path, PM.Vector3(0,0,0), name, scale)
+        print(f"Loaded {obj.name} from disk.")
+        return obj
+    except Exception as e:
+        print(f"Error loading {fileName}: {e}")
+        return None
 
 def renderArrayToImage(scene, renderMode): #add render modes heres
     internalStartTime = time.time()
     global renderType
     if renderMode == "depth":
-        byteArrayData = Renderer.RenderDepth(scene).data
+        byteArrayData = Renderer.RenderGPU(scene, 4).data
     elif renderMode == "normal":
-        byteArrayData = Renderer.RenderNormal(scene).data
+         byteArrayData = Renderer.RenderGPU(scene, 1).data
     elif renderMode == "diffuse":
-        byteArrayData = Renderer.RenderDiffuse(scene).data
-    elif renderMode == "fastdiffuse":
-        byteArrayData = Renderer.RenderDiffuseFast(scene).data
+        byteArrayData = Renderer.RenderGPU(scene, 3).data
+    elif renderMode == "traced":
+        byteArrayData = Renderer.RenderGPU(scene, 2).data
     else:
        print("No render mode selected, defaulting to normal.")
        renderMode, renderType = "normal", "normal"
-       byteArrayData = Renderer.RenderNormal(scene).data
+       byteArrayData = Renderer.RenderGPU(scene, 1).data
     
     #print("Expected:", width * height * 3)
     #print("Actual:", len(byteArrayData))
@@ -195,9 +204,8 @@ def averageFPS():
 
 def drawInfo(screen):
     lines = [
-        "1: depth, 2: normal", 
-        "3: diffuse, 4: fastdiffuse",
-        "",
+        "1: normal, 2: depth", 
+        "3: diffuse, 4: traced",
         "",
         "Left/Right arrow to orbit",
         "Up/Down arrow to zoom",
@@ -218,7 +226,8 @@ def drawInfo(screen):
         f"Verts: {numVerts}, Tris: {numTris}",
         f"Last/Tris: {round(frameTime/numTris,5)}",
         "",
-        "Q - Toggle BVH overlay",
+        "B - Toggle BVH overlay",
+        f"BVH: {renderingBVH}, Depth: {bvhDepth}",
         "",
         "",
         "",
@@ -231,13 +240,13 @@ def drawInfo(screen):
         screen.blit(surface, (x, y))
         y += surface.get_height()
 
-def traverseBVH(sf, node):
+def drawBVH(sf, node):
     if node.depth == bvhDepth:
         drawNodeOverlay(sf, node)
     if node.isLeaf:
         return len(node.triangles)
     else:
-        return traverseBVH(sf, node.left) + traverseBVH(sf, node.right)
+        return drawBVH(sf, node.left) + drawBVH(sf, node.right)
 
 def drawNodeOverlay(sf, node):
     xmin = node.boundsMin.x
@@ -295,7 +304,7 @@ scene = Geo.Scene()
 #sphere1.material = Geo.Material("blueMatte", PM.Vector3(1,0.2,0.1), 1, 1)
 #scene.AddObject(sphere1)
 #
-#suzanne = importObject("Suzanne.obj")
+#suzanne = importObject("Suzanne.obj", "Cool")
 #suzanne.material = Geo.Material("purple", PM.Vector3(0.5,0.1,0.6), 1, 1)
 #scene.AddObject(suzanne)
 #
@@ -315,28 +324,19 @@ scene.AddObject(fighter)
 #Fan.material = Geo.Material("white", PM.Vector3(1,1,1), 1, 1)
 #scene.AddObject(Fan)
 
-
-
-
-
-
-
-
-
-
 camera = Camera(PM.Vector3(0,0,0), PM.Vector3(1,0,0), PM.Vector3(0,0,1))
 scene.mainCamera = camera
 radius = 5
 
-lamp = Geo.Lamp(PM.Vector3(1.8,-2,-1.8), 2000)
+lamp = Geo.Lamp(PM.Vector3(1.8,-2,-1.8), 20)
 scene.AddLamp(lamp)
-
-renderType = input("\n\nRender depth/normal/diffuse : ").lower()
 #\SCENE CONSTRUCTION -------------------------
 
 
 #Pygame Initialization
 #region
+renderType = input("\n\nRender depth/normal/diffuse/traced : ").lower()
+
 print("Initializing 3D Editor...")
 pg.init()
 width = Config.imgWidth
@@ -345,7 +345,7 @@ height = Config.imgHeight
 sceen = pg.display.set_mode((width, height))
 pg.display.set_caption("Prismatix")
 clock = pg.time.Clock()
-font = pg.font.Font(r"C:\Users\ethan\source\repos\twlv12\Prismatix\Prismatix\font.ttf", 16)
+font = pg.font.Font(str(Path(__file__).parent / "font.ttf"), 16)
 print("Screen OK...")
 
 numVerts = 0
@@ -380,7 +380,7 @@ print("\nReady!")
 #endregion
 
 while running:
-    #KEYBINDS
+    #region KEYBINDS
     for event in pg.event.get():
         if event.type == pg.QUIT:
             running = False
@@ -402,13 +402,13 @@ while running:
                 focused = selectedObj.position
 
             if event.key == pg.K_1:
-                renderType = "depth"
-            if event.key == pg.K_2:
                 renderType = "normal"
+            if event.key == pg.K_2:
+                renderType = "depth"
             if event.key == pg.K_3:
                 renderType = "diffuse"
             if event.key == pg.K_4:
-                renderType = "fastdiffuse"
+                renderType = "traced"
             if event.key == pg.K_b:
                 renderingBVH = not renderingBVH
             if event.key == pg.K_LEFTBRACKET:
@@ -441,6 +441,7 @@ while running:
                     selectedObj.needsPrecomp = True
 
             rendering = True
+    #endregion
     
     if rendering:
         x = (radius * math.cos(angle)) + focused.x
@@ -457,7 +458,7 @@ while running:
         drawAxis(sceen, camera)
         drawInfo(sceen)
         if renderingBVH:
-            traverseBVH(sceen, scene.rootBVH)
+            drawBVH(sceen, scene.rootBVH)
 
     pg.display.flip()
     clock.tick(60)

@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "Prismatix": {
+      "commandName": "Project"
+    },
+    "Profile 1": {
+      "commandName": "Executable",
+      "executablePath": "python",
+      "commandLineArgs": "3DInterface.py",
+      "workingDirectory": "$(ProjectDir)"
+    }
+  }
+}

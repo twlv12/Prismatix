@@ -1,276 +1,152 @@
-using System;
-using SysMath = System.Math; //fixing ambugiuity with own prismatix.math
-using Prismatix.Math;
+using ComputeSharp;
 using Prismatix.Geometry;
-using System.Threading.Tasks;
+using Prismatix.Math;
+using Prismatix.Shaders;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using SysMath = System.Math; //fixing ambugiuity with own prismatix.math
 
 namespace Prismatix
 {
     public class Renderer
     {
-        public static Image RenderDepth(Scene scene)
+        //GPU buffers
+        private static ReadOnlyBuffer<GPUNode> gpuNodes;
+        private static ReadOnlyBuffer<GPUTriangle> gpuTris;
+        private static ReadOnlyBuffer<GPULamp> gpuLamps;
+        private static ReadWriteTexture2D<uint> gpuImage;
+
+        //CPU buffers (for pythno)
+        private static byte[] rawPixelData;
+        private static uint[] gpuDownloadBuffer;
+
+        public static Image RenderGPU(Scene scene, int renderMode)
         {
-            #region Render Setup
             int width = Config.imgWidth;
             int height = Config.imgHeight;
             Image image = new Image(width, height);
 
-            //using a depth buffer for a 2 stage render to find min and max depth first
-            float[] depthBuffer = new float[width*height];
-            float minDepth = float.MaxValue;
-            float maxDepth = float.MinValue;
+            #region Precompute & Build Buffers
+            bool needsGPUTransmit = false;
 
+            //precompute and check if gpu buffers need to be rebuilt (if scene changed)
             foreach (var obj in scene.objects)
             {
                 if (obj.needsPrecomp)
                 {
                     obj.BakeAllTris();
-                    scene.BuildBVH();
                     obj.needsPrecomp = false;
-                }
-            }
-            #endregion
-
-            #region Main Rendering Loop => depthBuffer
-            Parallel.For(0, height, y => //multithread for each row of pixels
-            {   for (int x = 0; x < width; x++) //for every pixel...
-                {
-                    Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
-
-                    #region Depth Logic => depthBuffer
-                    float depth = -1;
-                    if (closestHit.HasValue){
-                        depth = closestHit.Value.distance; //use these .Value things for nullable (HitInfo?) structs
-                        if (depth < minDepth) minDepth = depth; //calculating the min and max depth from shorted and longest rays
-                        if (depth > maxDepth) maxDepth = depth;
-                    }
-                    depthBuffer[y*width +x] = depth;
-                    #endregion
-                }
-            });
-            #endregion Main Rendering Loop
-
-            #region Shading Pass => image
-            for (int i = 0; i < depthBuffer.Length; i++){ //now convert all to shade
-                float depth = depthBuffer[i];
-                byte shade = 0;
-
-                Vector3 colour = new Vector3(0, 0, 0);
-                if (depth >= 0){
-                    float value = Utils.Remap(depth, minDepth, maxDepth, 255, 0);
-                    shade = (byte)Utils.Clamp(value, 0, 255);
-                    colour = new Vector3(shade, shade, shade);
-                }
-                else{
-                    colour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
-                }
-                
-                image.SetPixel(i%width, i/width, colour);
-            }
-            #endregion Shading Pass
-
-            return image;
-        }
-
-        public static Image RenderNormal(Scene scene)
-        {
-            #region Render Setup
-            int width = Config.imgWidth;
-            int height = Config.imgHeight;
-
-            //multiply by 3 to give 3 bytes for each RGB
-            Image image = new Image(width, height);
-            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
-
-            foreach (var obj in scene.objects){
-                if (obj.needsPrecomp){
-                    obj.BakeAllTris();
-                    scene.BuildBVH();
-                    obj.needsPrecomp = false;
-                }
-            }
-            #endregion
-
-            #region Main Rendering Loop => image
-            Parallel.For(0, height, y => //multithread for each row of pixels
-            {   for (int x = 0; x < width; x++)
-                {
-                    Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
-
-                    #region Normal Logic => image
-                    if (!closestHit.HasValue)
-                    { //if no hit so background
-                        image.SetPixel(x, y, bgColour);
-                        continue;
-                    } //for some reason causes a crash when using an else statement below
-                    //solved: the bg colour wasnt set in the config cs.
-
-                    Vector3 colour = new Vector3(0, 0, 0);
-                    //normal logic
-
-                    if (closestHit.HasValue){
-                        Vector3 normal = closestHit.Value.normal;
-                        byte red = (byte)Utils.Remap(normal.x, -1, 1, 0, 255);
-                        byte green = (byte)Utils.Remap(normal.y, -1, 1, 0, 255);
-                        byte blue = (byte)Utils.Remap(normal.z, -1, 1, 0, 255);
-                    
-                        image.SetPixel(x, y, new Vector3(red, green, blue));
-                    }
-                    
-                    #endregion
-                }
-            });
-            #endregion
-
-            return image;
-        }
-
-        public static Image RenderDiffuse(Scene scene)
-        {
-            #region Render Setup
-            int width = Config.imgWidth;
-            int height = Config.imgHeight;
-
-            //multiply by 3 to give 3 bytes for each RGB
-            Image image = new Image(width, height);
-            Vector3 bgColour = new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]);
-
-            foreach (var obj in scene.objects){
-                if (obj.needsPrecomp){
-                    obj.BakeAllTris();
-                    scene.BuildBVH();
-                    obj.needsPrecomp = false;
+                    needsGPUTransmit = true;
                 }
             }
 
-            #endregion
-
-            #region Main Rendering Loop => image
-            Parallel.For(0, height, y => //multithread for each row of pixels
+            //only need to rebuild genometry buffers if scene changed
+            if (needsGPUTransmit || gpuNodes == null)
             {
-                for (int x = 0; x < width; x++)
-                {
-                    Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
+                scene.BuildBVH();
+                var (nodesArr, trisArr) = scene.GPUifyBVH();
 
-                    if (!closestHit.HasValue)
-                    { //if no hit so background
-                        image.SetPixel(x, y, bgColour);
-                        continue;
-                    }
-
-                    #region Shadow Rays & Dot => image
-                    float illumination = 0f;
-                    Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
-
-                    if (closestHit.HasValue)
+                //flatten data to value types for gpu
+                Shaders.GPULamp[] flatLamps = new Shaders.GPULamp[scene.lamps.Count];
+                for (int i = 0; i < scene.lamps.Count; i++)
+                    flatLamps[i] = new Shaders.GPULamp
                     {
-                        foreach (var lamp in scene.lamps)
-                        {
-                            Boolean blocked = false;
+                        position = scene.lamps[i].position,
+                        brightness = scene.lamps[i].brightness
+                    };
 
-                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
-                            float distToLamp = vecToLamp.Magnitude();
-                            Vector3 dirToLamp = vecToLamp/distToLamp;
+                //remove old and create new gpu vram buffers
+                gpuNodes?.Dispose();
+                gpuTris?.Dispose();
+                gpuLamps?.Dispose();
+                gpuNodes = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(nodesArr);
+                gpuTris = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(trisArr);
+                gpuLamps = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(flatLamps);
+            }
 
-                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp);
-                            HitInfo? closestShadowHit = Utils.TraverseBVH(shadowRay, scene.rootBVH);
-
-                            #region Shade => image
-                            if (!blocked) {
-                                float dot = Utils.Dot(dirToLamp, closestHit.Value.normal);
-                                if (dot < 0) dot = 0;
-                                illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
-                            }
-                        }
-
-                        Vector3 matCol = closestHit.Value.material.colour;
-                        Vector3 ambient = matCol * Config.ambientIntensity;
-
-                        float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
-                        image.SetPixel(x, y, pixelLumen*matCol +ambient);
-                        #endregion
-                    }
-
-                    #endregion
-                }
-            });
-            #endregion
-
-            return image;
-        }
-
-        public static Image RenderDiffuseFast(Scene scene)
-        {
-            #region Render Setup
-            int width = Config.imgWidth;
-            int height = Config.imgHeight;
-
-            //multiply by 3 to give 3 bytes for each RGB
-            Image image = new Image(width, height);
-
-            foreach (var obj in scene.objects){
-                if (obj.needsPrecomp){
-                    obj.BakeAllTris();
-                    scene.BuildBVH();
-                    obj.needsPrecomp = false;
-                }
+            //only need to rebuild image and bytearr buffers if resolution changed
+            if (gpuImage == null || gpuImage.Width != width || gpuImage.Height != height)
+            {
+                gpuImage?.Dispose();
+                gpuImage = GraphicsDevice.GetDefault().AllocateReadWriteTexture2D<uint>(width, height);
+                gpuDownloadBuffer = new uint[width * height];
+                rawPixelData = new byte[width * height * 3]; 
             }
             #endregion
 
-            #region Main Rendering Loop => image
-            Parallel.For(0, height, y => //multithread for each row of pixels
+            float3 bgColour = new float3(
+                Config.bgColour[0] / 255f,
+                Config.bgColour[1] / 255f,
+                Config.bgColour[2] / 255f);
+            var shader = new Shaders.Shader(
+                gpuNodes, gpuTris, gpuLamps, gpuImage,
+                renderMode, Config.maxSamples, Config.maxRayDepth, bgColour,
+                scene.mainCamera.position, scene.mainCamera.origin,
+                scene.mainCamera.horizontal, scene.mainCamera.vertical,
+                width, height
+            );
+
+            //GO GPU! and retrieve once done
+            GraphicsDevice.GetDefault().For(width, height, shader);
+            gpuImage.CopyTo(gpuDownloadBuffer);
+
+            //much faster raw bytearr rather than double for loop drawing pixel
+            int byteIndex = 0;
+
+            if (renderMode == 4)
             {
-                for (int x = 0; x < width-3; x+=3)
+                float minDepth = float.MaxValue;
+                float maxDepth = float.MinValue;
+
+                //find min and max vals
+                for (int i = 0; i < gpuDownloadBuffer.Length; i++)
                 {
-                    Raycast ray = scene.mainCamera.ShootRay(x, y);
-                    HitInfo? closestHit = Utils.TraverseBVH(ray, scene.rootBVH);
-
-                    if (!closestHit.HasValue)
-                    { //if no hit so background
-                        image.SetPixel(x, y, new Vector3(Config.bgColour[0], Config.bgColour[1], Config.bgColour[2]));
-                        continue;
-                    }
-
-                    #region Shadow Rays & Dot => image
-                    float illumination = 0f;
-                    if (closestHit.HasValue)
+                    float dist = BitConverter.UInt32BitsToSingle(gpuDownloadBuffer[i]);
+                    if (dist >= 0)
                     {
-                        foreach (var lamp in scene.lamps)
-                        {
-                            Boolean blocked = false;
-                            Vector3 vecToLamp = lamp.position - closestHit.Value.point;
-                            Vector3 shadowRayOrigin = closestHit.Value.point + closestHit.Value.normal * 0.001f;
+                        if (dist < minDepth) minDepth = dist;
+                        if (dist > maxDepth) maxDepth = dist;
+                    }
+                }
 
-                            float distToLamp = vecToLamp.Magnitude();
-                            Vector3 dirToLamp = vecToLamp / distToLamp;
+                if (maxDepth == minDepth) maxDepth = minDepth + 0.1f;
+                //check to prevent div by zero
 
-                            Raycast shadowRay = new Raycast(shadowRayOrigin, dirToLamp);
-                            HitInfo? closestShadowHit = Utils.TraverseBVH(shadowRay, scene.rootBVH);
+                //remap data to 0-255
+                for (int i = 0; i < gpuDownloadBuffer.Length; i++)
+                {
+                    float dist = BitConverter.UInt32BitsToSingle(gpuDownloadBuffer[i]);
+                    byte col = 0; // Background is black
 
-                            #region Shade => image
-                            if (!blocked)
-                            {
-                                float dot = Utils.Dot(dirToLamp, closestHit.Value.normal);
-                                if (dot < 0) dot = 0;
-                                illumination += (lamp.brightness * dot) / (distToLamp * distToLamp);
-                            }
-                        }
-                        float pixelLumen = Utils.Clamp(illumination, 0f, 255f);
-                        image.SetPixel(x, y, new Vector3(pixelLumen, pixelLumen, pixelLumen));
-                        #endregion
+                    if (dist >= 0)
+                    {
+                        // Normalize 0.0 to 1.0 (Closest = 1.0/White, Furthest = 0.0/Black)
+                        float normalized = 1.0f - ((dist - minDepth) / (maxDepth - minDepth));
+                        col = (byte)(normalized * 255f);
                     }
 
-                    #endregion
+                    rawPixelData[byteIndex++] = col;
+                    rawPixelData[byteIndex++] = col;
+                    rawPixelData[byteIndex++] = col;
                 }
-            });
-            #endregion
-
-            return image;
+            }
+            else
+            {
+                //info why bitpacking in CShaders.cs
+                for (int i = 0; i < gpuDownloadBuffer.Length; i++)
+                {
+                    uint packedColour = gpuDownloadBuffer[i];
+                    rawPixelData[byteIndex++] = (byte)(packedColour & 0xFF);   //first 8
+                    rawPixelData[byteIndex++] = (byte)((packedColour >> 8) & 0xFF);  //second 8
+                    rawPixelData[byteIndex++] = (byte)((packedColour >> 16) & 0xFF); //third 8
+                }
+            }
+            
+            Image output = new Image(width, height);
+            output.data = rawPixelData;
+            return output;
         }
     }
 
@@ -338,9 +214,20 @@ namespace Prismatix
         #region Raycast
         public Vector3 origin;
         public Vector3 direction;
+        public Vector3 invDirection;
+        //precompute the direction for much faster bounds checking
+        //division is very slow compared to *
+        //before: suzanne took normal:0.05s, traced:0.5s
+        //before: fighter took normal:0.5s, traced:5.2s
+
         public Raycast(Vector3 start, Vector3 dir){
             origin = start;
             direction = dir;
+            invDirection = new Vector3(
+                1f / (dir.x == 0 ? 0.00001f : dir.x),
+                1f / (dir.y == 0 ? 0.00001f : dir.y),
+                1f / (dir.z == 0 ? 0.00001f : dir.z)
+            );
         }
         #endregion
     }
@@ -364,31 +251,30 @@ namespace Prismatix
         {
             position = pos;
             forward = forwardDir.Normalized();
-            right = Utils.Cross(upDir, forward).Normalized();
 
-            //recompute up to ensure its perpendicualar, caused the weird parallelogram effect
+            //recompute up to ensure its perpendicualar
+            right = Utils.Cross(upDir, forward).Normalized();
             up = Utils.Cross(forward, right);
 
-            vpHeight = 2f * (float)SysMath.Tan(Config.fov / 2f);
+            vpHeight = 2f * (float)SysMath.Tan(Config.fovRad / 2f);
             vpWidth = vpHeight * Config.aspectRatio;
+
             horizontal = right * vpWidth;
             vertical = up * vpHeight;
 
             center = position + forward; //origin is top left of viewplane
-            origin = center - right*(vpWidth / 2f) - up*(vpHeight / 2f);
+            origin = center - right * (vpWidth / 2f) - up * (vpHeight / 2f);
             //previously had Vector3 origin here, which was only creating local var. meaning tris
             //were created relative to camera origin and not in world space, I think that was the issue
         }
 
-        public Raycast ShootRay(int x, int y)
+        public Raycast ShootRay(float x, float y) //now uses floats instead/ints for AA jitter
         {
-            float u = (float)x / (Config.imgWidth -1);
-            float v = (float)y / (Config.imgHeight -1);
+            float u = x / (Config.imgWidth - 1);
+            float v = y / (Config.imgHeight - 1);
 
-            Vector3 pixelVector = origin + u*horizontal + v*vertical;
+            Vector3 pixelVector = origin + u * horizontal + v * vertical;
             Vector3 rayDirection = (pixelVector - position).Normalized();
-
-            //Console.WriteLine($"Forward: {forward}, RayDir: {rayDirection}");
 
             return new Raycast(position, rayDirection);
         }
@@ -398,16 +284,12 @@ namespace Prismatix
             forward = (target - position).Normalized();
             
             Vector3 worldUp = new Vector3(0,0,1);
-            up = worldUp - forward*Utils.Dot(worldUp, forward);
+            up = worldUp - forward * Utils.Dot(worldUp, forward);
             up = up.Normalized();
-            
-            //calc up
-            
+
             right = Utils.Cross(up, forward).Normalized();
-            
-            //recompute up to ensure its perpendicualar, caused the weird parallelogram effect
             up = Utils.Cross(forward, right);
-            
+
             horizontal = right * vpWidth;
             vertical = up * vpHeight;
             

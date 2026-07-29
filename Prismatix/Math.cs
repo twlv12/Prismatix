@@ -1,17 +1,21 @@
-using Prismatix;
 using Prismatix.Geometry;
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using SysMath = System.Math;
 
 namespace Prismatix.Math
 {
-    public struct Vector3 //was previously class, changed to struct for SPEED!!!
+    //structs are much faster/less memory,
+    //when copied/created in bulk, such as tracing
+    public struct Vector3
     {
         public float x,y,z;
 
         #region Constructor And Operators
+        //aggressive inlining forces compiler to inline functions, increasing speed a bit in hotloops
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector3(float X, float Y, float Z){
             this.x = X;
             this.y = Y;
@@ -21,27 +25,39 @@ namespace Prismatix.Math
         public override string ToString(){
             return $"Vector3({x},{y},{z})";
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector3 Normalized(){
             float magnitude = (float)SysMath.Sqrt(x*x + y*y + z*z);
             return magnitude>0 ? this / magnitude : new Vector3(0,0,0);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float Magnitude(){
             return (float)SysMath.Sqrt(x*x + y*y + z*z);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 operator +(Vector3 a, Vector3 b) {
             return new Vector3(a.x+b.x, a.y+b.y, a.z+b.z);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 operator -(Vector3 a, Vector3 b) {
             return new Vector3(a.x-b.x, a.y-b.y, a.z-b.z);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 operator *(Vector3 a, float multiplier) {
             return new Vector3(a.x*multiplier, a.y*multiplier, a.z*multiplier);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 operator *(float multiplier, Vector3 a) {
             return a*multiplier; //just use the previous one
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 operator /(Vector3 a, float multiplier) {
             return new Vector3(a.x/multiplier, a.y/multiplier, a.z/multiplier);
+        }
+
+        //converts between Vector3 and float3 for HLSL
+        public static implicit operator ComputeSharp.Float3(Vector3 v) {
+            return new ComputeSharp.Float3(v.x, v.y, v.z);
         }
         #endregion
     }
@@ -100,7 +116,8 @@ namespace Prismatix.Math
     public static class Utils
     {
         #region Boring Math Functions
-        //gives the 2d vector perpendicular to the two input vectors 
+        //gives the 2d vector perpendicular to the two input vectors
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Vector3 Cross(Vector3 a, Vector3 b) {
             return new Vector3(
             a.y * b.z - a.z * b.y,
@@ -108,9 +125,35 @@ namespace Prismatix.Math
             a.x * b.y - a.y * b.x
             );
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float Dot(Vector3 a, Vector3 b) {
             return a.x * b.x + a.y * b.y + a.z * b.z;
         }
+
+        //threadstatic avoids any crashes or false rands on multithreading
+        [ThreadStatic]
+        private static Random localRandom;
+        public static Random Rnd
+        {
+            get
+            {
+                if (localRandom == null) localRandom = new Random(Guid.NewGuid().GetHashCode());
+                return localRandom;
+            }
+        }
+        public static float RandomFloat() => (float)Rnd.NextDouble();
+        public static float RandomFloat(float min, float max) => min + (float)Rnd.NextDouble() * (max - min);
+        public static Vector3 RandomVector()
+        {
+            while (true)
+            {
+                Vector3 vector = new Vector3(RandomFloat(-1, 1), RandomFloat(-1, 1), RandomFloat(-1, 1));
+                if (vector.Magnitude() * vector.Magnitude() >= 1) continue;
+                return vector;
+            }
+        }
+
+
         public static float Remap(float value, float inMin, float inMax, float outMin, float outMax) {
             return outMin + (value - inMin) * (outMax - outMin) / (inMax - inMin);
         }
@@ -139,96 +182,96 @@ namespace Prismatix.Math
             else { result.z = a.z; }
             return result;
         }
-        public static Vector3 FormatVector(Vector3 a)
-        { //old function used to remap blender's default coordinate
-            //system to mine, but ended up just doing a blender-side fix
-            return new Vector3(a.x, a.z, -a.y);
-        }
         public static Vector3 GetTriCenter(Triangle tri) {
             return (tri.a + tri.b + tri.c) / 3;
         }
         #endregion
 
         #region Cool Math Functions
-        public static HitInfo? TraverseBVH(Raycast ray, BoundingVolume node)
+        public static HitInfo? TraverseBVH(Raycast ray, BoundingVolume root)
         {
-            #region Leaf => Tri Intersection
-            if (node.isLeaf)
+            if (root == null) return null;
+
+            //iterative method
+            //culls the futher bounding boxes, essentially early exit
+            HitInfo? closestHit = null;
+            
+            //use a fixed array instead, assuming 60 depth for essentially unlimited tris
+            BoundingVolume[] array = new BoundingVolume[60]; 
+            int index = 0;
+            //if i decide to move to any GPU shader compute later,
+            //its a step toward it
+
+            index++;
+            array[index] = root;
+            while (index > 0)
             {
-                HitInfo? closestHit = null;
+                //get node off front of array
+                BoundingVolume node = array[--index];
 
-                foreach (Triangle tri in node.triangles)
+                if (node.isLeaf)
                 {
-                    HitInfo? hit = GetRayIntersect(ray, tri);
-                    if (hit.HasValue) {
-                        var hV = hit.Value;
-                        hV.material = tri.hostObj.material;
-
-                        if (!closestHit.HasValue || hV.distance < closestHit.Value.distance)
+                    //if leaf, revert to simple testing each tri
+                    if (node.triangles != null)
+                    foreach (Triangle tri in node.triangles)
+                    {
+                        HitInfo? hit = GetRayIntersect(ray, tri);
+                        if (hit.HasValue)
                         {
-                            closestHit = hV;
+                            var hV = hit.Value;
+                            if (!closestHit.HasValue || hV.distance < closestHit.Value.distance)
+                            {
+                                if (tri.hostObj != null && tri.hostObj.material != null)
+                                    hV.material = tri.hostObj.material;
+                                closestHit = hV;
+                            }
                         }
                     }
                 }
-                return closestHit;
-            }
-            #endregion
-
-            #region !Leaf => Traverse Lower
-            else
-            {
-                HitInfo? hitLeft = null;
-                HitInfo? hitRight = null;
-                HitInfo? closestHit = null;
-
-                if (GetRayHitsBounds(ray, node.left.boundsMin, node.left.boundsMax)) {
-                    hitLeft = TraverseBVH(ray, node.left);
-                }
-                if (GetRayHitsBounds(ray, node.right.boundsMin, node.right.boundsMax)) {
-                    hitRight = TraverseBVH(ray, node.right);
-                }
-
-                #region Compare L/R => closestHit
-                if (hitLeft.HasValue && hitRight.HasValue)
+                else
                 {
-                    if (hitLeft.Value.distance < hitRight.Value.distance){
-                        closestHit = hitLeft;
+                    float distL = float.MaxValue;
+                    float distR = float.MaxValue;
+
+                    //parent -> test each child
+                    bool hitLeft = node.left != null 
+                        && GetRayHitsBounds(ray, node.left.boundsMin, node.left.boundsMax, out distL);
+                    bool hitRight = node.right != null 
+                        && GetRayHitsBounds(ray, node.right.boundsMin, node.right.boundsMax, out distR);
+
+                    //early exit: test if box is further than already hit tri
+                    if (closestHit.HasValue)
+                    {
+                        if (hitLeft && distL >= closestHit.Value.distance) hitLeft = false;
+                        if (hitRight && distR >= closestHit.Value.distance) hitRight = false;
                     }
-                    else{
-                        closestHit = hitRight;
+
+                    //put furthest first, so closest is retrieved from front of array
+                    if (hitLeft && hitRight)
+                    {
+                        if (distL < distR)
+                        {
+                            array[index++] = node.right;
+                            array[index++] = node.left;
+                        }
+                        else
+                        {
+                            array[index++] = node.left;
+                            array[index++] = node.right;
+                        }
+                    }
+                    else if (hitLeft)
+                    {
+                        array[index++] = node.left;
+                    }
+                    else if (hitRight)
+                    {
+                        array[index++] = node.right;
                     }
                 }
-
-                else if (hitLeft.HasValue && hitRight == null){
-                    closestHit = hitLeft;
-                }
-                else if (hitRight.HasValue && hitLeft == null) {
-                    closestHit = hitRight;
-                }
-                else { return null; }
-                #endregion
-
-                return closestHit;
-            }
-            #endregion
-        }
-
-        public static (Vector3, Vector3) CalculateBounds(List<Triangle> trisToBound)
-        {
-            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-
-            foreach (var tri in trisToBound) {
-                min = Utils.Min(tri.a, min);
-                min = Utils.Min(tri.b, min);
-                min = Utils.Min(tri.c, min);
-
-                max = Utils.Max(tri.a, max);
-                max = Utils.Max(tri.b, max);
-                max = Utils.Max(tri.c, max);
             }
 
-            return (min, max);
+            return closestHit;
         }
 
         public static HitInfo? GetRayIntersect(Raycast ray, Triangle trig)
@@ -278,48 +321,56 @@ namespace Prismatix.Math
             return hitInfo;
         }
 
-        public static bool GetRayHitsBounds(Raycast ray, Vector3 min, Vector3 max)
+        public static (Vector3, Vector3) CalculateBounds(List<Triangle> trisToBound)
         {
-            //t representing time along the ray
-            float tEnterX = (min.x - ray.origin.x) / ray.direction.x;
-            float tExitX = (max.x - ray.origin.x) / ray.direction.x;
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
 
-            if (tEnterX > tExitX) { //flip so enter is larger
-                float temp = tEnterX;
-                tEnterX = tExitX;
-                tExitX = temp;
-            }
-
-            float tEnterY = (min.y - ray.origin.y) / ray.direction.y;
-            float tExitY = (max.y - ray.origin.y) / ray.direction.y;
-
-            if (tEnterY > tExitY) {
-                float temp = tEnterY;
-                tEnterY = tExitY;
-                tExitY = temp;
-            }
-
-            if (tEnterX > tExitY || tEnterY > tExitX)
-                return false;
-
-            float tEnter = SysMath.Max(tEnterX, tEnterY);
-            float tExit = SysMath.Min(tExitX, tExitY);
-
-            float tEnterZ = (min.z - ray.origin.z) / ray.direction.z;
-            float tExitZ = (max.z - ray.origin.z) / ray.direction.z;
-
-            if (tEnterZ > tExitZ)
+            foreach (var tri in trisToBound)
             {
-                float temp = tEnterZ;
-                tEnterZ = tExitZ;
-                tExitZ = temp;
+                min = Utils.Min(tri.a, min);
+                min = Utils.Min(tri.b, min);
+                min = Utils.Min(tri.c, min);
+
+                max = Utils.Max(tri.a, max);
+                max = Utils.Max(tri.b, max);
+                max = Utils.Max(tri.c, max);
+            } //Calc Min and Max Vectors
+
+            return (min, max);
+        }
+
+        public static bool GetRayHitsBounds(Raycast ray, Vector3 min, Vector3 max, out float hitDistance)
+        {
+            hitDistance = 0f;
+
+            //changed from using enter and exit, then slow swapping,
+            //use min(),max() instead, and also use the precomputed invDirection from ray.
+            //much faster
+
+            float tA = (min.x - ray.origin.x) * ray.invDirection.x;
+            float tB = (max.x - ray.origin.x) * ray.invDirection.x;
+            float tMin = SysMath.Min(tA, tB);
+            float tMax = SysMath.Max(tA, tB);
+
+            tA = (min.y - ray.origin.y) * ray.invDirection.y;
+            tB = (max.y - ray.origin.y) * ray.invDirection.y;
+            tMin = SysMath.Max(tMin, SysMath.Min(tA, tB));
+            tMax = SysMath.Min(tMax, SysMath.Max(tA, tB));
+
+            tA = (min.z - ray.origin.z) * ray.invDirection.z;
+            tB = (max.z - ray.origin.z) * ray.invDirection.z;
+            tMin = SysMath.Max(tMin, SysMath.Min(tA, tB));
+            tMax = SysMath.Min(tMax, SysMath.Max(tA, tB));
+
+            //final check if ray passed thru any
+            if (tMax >= tMin && tMax >= 0)
+            {
+                hitDistance = tMin < 0 ? 0 : tMin;
+                return true;
             }
 
-            //final check if thru any
-            if (tEnter > tExitZ || tEnterZ > tExit)
-                return false;
-
-            return true;
+            return false;
         }
         #endregion
     }

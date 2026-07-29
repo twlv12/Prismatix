@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using SysMath = System.Math;
 
@@ -9,54 +11,42 @@ namespace Prismatix
     //so that i dont have to rebuild every time to change the config
     //STILL NEED TO REBUILD WHEN ADDING NEW FIELD
 
-//MAKE SURE TO ADD ALL FOUR REFS FOR ANY NEW CONFIG VAR & REBUILD
     public static class Config
     {
         public static int imgWidth { get; set; }
         public static int imgHeight { get; set; }
-        public static float aspectRatio { get; set; }
         public static float fov { get; set; }
-        public static float maxSamples { get; set; }
-        public static float maxBounces { get; set; }
-        public static float maxRayDepth { get; set; }
+
+        public static int maxSamples { get; set; }
+        public static int maxRayDepth { get; set; }
+        public static int triThreshold { get; set; }
+
         public static int[] bgColour { get; set; }
         public static float ambientIntensity { get; set; }
-        public static int triThreshold { get; set; }
+
+
+        public static float aspectRatio => (float)imgWidth / imgHeight;
+        public static float fovRad => fov * (float)SysMath.PI / 180f;
+
 
         public static void Load(string path)
         {
             string json = File.ReadAllText(path);
-            var config = JsonSerializer.Deserialize<ConfigData>(json);
-            //automatically assigns config data attributes to fields in the json
-            //had problems before directly setting the static attributes
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            //deserialize to dictionary so can directly apply new configs 
 
-            imgWidth = config.imgWidth;
-            imgHeight = config.imgHeight;
-            aspectRatio = (float)config.imgWidth / (float)config.imgHeight;
-            fov = config.fov * (float)SysMath.PI / 180f; // convert to radians if needed
-            maxSamples = config.maxSamples;
-            maxBounces = config.maxBounces;
-            maxRayDepth = config.maxRayDepth;
-            bgColour = config.bgColour;
-            ambientIntensity = config.ambientIntensity;
-            triThreshold = config.triThreshold;
+            foreach (var keyval in dict)
+            {
+                var prop = typeof(Config).GetProperty(keyval.Key, BindingFlags.Public | BindingFlags.Static);
 
-            Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fov}rad");
-        }
+                if (prop != null && prop.CanWrite)
+                {
+                    object value = JsonSerializer.Deserialize(keyval.Value.GetRawText(), prop.PropertyType);
+                    prop.SetValue(null, value);
+                }
+            }
 
-        private class ConfigData
-        { //temporary struct to hold data from json
-            //cant directly deserialize to main config class
-            public int imgWidth { get; set; }
-            public int imgHeight { get; set; }
-            public float aspectRatio { get; set; }
-            public float fov { get; set; }
-            public float maxSamples { get; set; }
-            public float maxBounces { get; set; }
-            public float maxRayDepth { get; set; }
-            public int[] bgColour { get; set; }
-            public float ambientIntensity { get; set; }
-            public int triThreshold { get; set; }
+            Console.WriteLine($"Resolution: {imgWidth}x{imgHeight}px FOV: {fovRad}rad");
         }
     }
 }
