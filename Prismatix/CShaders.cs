@@ -132,7 +132,7 @@ namespace Prismatix.Shaders
         public readonly ReadOnlyBuffer<GPULamp> lamps;
         public readonly ReadWriteTexture2D<uint> outputImage;
 
-        //GPU will not be able to access any c# data, so must pass in here now
+        //GPU will not be able to access any c# obj data, so must pass in here now
         public readonly int renderMode; //0 depth, 1 normal, 2 diffuse, 3 traced
         public readonly int maxSamples;
         public readonly int maxRayDepth;

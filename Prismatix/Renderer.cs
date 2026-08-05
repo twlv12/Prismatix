@@ -5,6 +5,7 @@ using Prismatix.Shaders;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using SysMath = System.Math; //fixing ambugiuity with own prismatix.math
 
@@ -182,7 +183,7 @@ namespace Prismatix
             #endregion
 
             #region Leaf || Parent?
-            if (trisGiven.Count <= Config.triThreshold)
+            if (trisGiven.Count <= Config.triThreshold || depth > 64 || trisGiven.Count <= 1)
             {
                 isLeaf = true;
                 triangles = trisGiven;
@@ -201,6 +202,15 @@ namespace Prismatix
                     trianglesToGive = trisGiven.OrderBy(tri => tri.center.z).ToList();}
 
                 int numTri = trianglesToGive.Count;
+                int mid = numTri / 2;
+
+                if (mid == 0 || mid == numTri)
+                {
+                    isLeaf = true;
+                    triangles = trisGiven;
+                    return;
+                }
+
                 left = new BoundingVolume(trianglesToGive.GetRange (0       , numTri/2         ), depth+1);
                 right = new BoundingVolume(trianglesToGive.GetRange(numTri/2, numTri-(numTri/2)), depth+1);
                 #endregion
@@ -270,10 +280,10 @@ namespace Prismatix
 
         public Raycast ShootRay(float x, float y) //now uses floats instead/ints for AA jitter
         {
-            float u = x / (Config.imgWidth - 1);
-            float v = y / (Config.imgHeight - 1);
+            float screenX = x / (Config.imgWidth - 1);
+            float screenY = y / (Config.imgHeight - 1);
 
-            Vector3 pixelVector = origin + u * horizontal + v * vertical;
+            Vector3 pixelVector = origin + screenX * horizontal + screenY * vertical;
             Vector3 rayDirection = (pixelVector - position).Normalized();
 
             return new Raycast(position, rayDirection);
@@ -283,7 +293,14 @@ namespace Prismatix
         {
             forward = (target - position).Normalized();
             
-            Vector3 worldUp = new Vector3(0,0,1);
+            Vector3 worldUp = new Vector3(0,1,0);
+            float dot = Utils.Dot(worldUp, forward);
+
+            //this prevents gimbal locking when cam aligned with world Z axis
+            if (SysMath.Abs(dot) > 0.999f)
+                //temp change reference axis
+                worldUp = new Vector3(0, 0, 1);
+
             up = worldUp - forward * Utils.Dot(worldUp, forward);
             up = up.Normalized();
 
