@@ -3,6 +3,7 @@ using Prismatix.Shaders;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using StbImageSharp;
 
 namespace Prismatix.Geometry
 {
@@ -12,6 +13,14 @@ namespace Prismatix.Geometry
         public List<Lamp> lamps = new List<Lamp>();
         public Camera mainCamera;
         public BoundingVolume rootBVH;
+        public bool isOutdated = true;
+
+        public bool useHdri = false;
+        public bool hdriOutdated = true;
+        public int hdriWidth = 1;
+        public int hdriHeight = 1;
+        public float4[] hdriArray = { new float4(0, 0, 0, 1) };
+        public float hdriIntensity = 1.0f;
 
         public Scene(){
             BuildBVH();
@@ -23,17 +32,53 @@ namespace Prismatix.Geometry
         }
         public void AddLamp(Lamp lamp){
             lamps.Add(lamp); }
+        public void SetHDRI(string path)
+        {
+            try
+            {
+                using (Stream stream = File.OpenRead(path))
+                {
+                    //force loading as 32 bits per channel
+                    ImageResultFloat image = ImageResultFloat.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+
+                    hdriWidth = image.Width;
+                    hdriHeight = image.Height;
+                    hdriArray = new float4[hdriWidth * hdriHeight];
+
+                    //float array with each val being R G B A sequential
+                    for (int i = 0; i < hdriWidth * hdriHeight; i++)
+                    {
+                        float r = image.Data[i * 4 + 0];
+                        float g = image.Data[i * 4 + 1];
+                        float b = image.Data[i * 4 + 2];
+                        float a = image.Data[i * 4 + 3];
+
+                        hdriArray[i] = new float4(r, g, b, a);
+                    }
+                }
+                hdriOutdated = true;
+                Console.WriteLine($"loaded di hdri: {Path.GetFileName(path)}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"failed to load hdri: {ex.Message}");
+            }
+        }
 
         public void BuildBVH()
         {
             List<Triangle> listOfAllTris = new List<Triangle>();
             foreach (Object obj in objects){
+                if (!obj.isVisible) continue; //can simply exclude hidden objects from bvh to disable rendering them.
                 foreach (Triangle tri in obj.bakedTriangles){
                     listOfAllTris.Add(tri);
                 }
             }
 
-            rootBVH = new BoundingVolume(listOfAllTris, 0);
+            if (listOfAllTris.Count > 0)
+                rootBVH = new BoundingVolume(listOfAllTris, 0);
+            else
+                rootBVH = null;
         }
 
         public (GPUNode[] nodeArr, GPUTriangle[] trisArr) GPUifyBVH()
@@ -48,6 +93,7 @@ namespace Prismatix.Geometry
             //now this is the flattened arrays - array for GPU
             return (nodesList.ToArray(), trisList.ToArray());
         }
+
         public int GPUifyNode(BoundingVolume node, List<GPUNode> nodesList, List<GPUTriangle> trisList)
         {
             //if doesnt exist, return that previous was leaf
@@ -108,6 +154,7 @@ namespace Prismatix.Geometry
         public string name;
         public Vector3 position;
         public float brightness = 10.0f;
+        public bool isVisible = true;
         
         public Lamp(Vector3 pos, float lumen){
             position = pos; 
@@ -153,9 +200,12 @@ namespace Prismatix.Geometry
         public string name;
         public Vector3 position;
         public float scale;
+        public Vector3 rotation = new Vector3(0, 0, 0);
         public Material material;
         public List<Triangle> bakedTriangles = new List<Triangle>();
         public Boolean needsPrecomp = true;
+        public bool isVisible = true;
+
 
         public Object(string nam, Vector3 pos, float scl)
         {
@@ -167,13 +217,39 @@ namespace Prismatix.Geometry
         public void BakeAllTris()
         {
             bakedTriangles.Clear();
+
+            //precompute convert degrees to radians for use in euler rotation
+            float radX = rotation.x * (MathF.PI / 180f);
+            float radY = rotation.y * (MathF.PI / 180f);
+            float radZ = rotation.z * (MathF.PI / 180f);
+
+            float cosx = MathF.Cos(radX), sinx = MathF.Sin(radX);
+            float cosy = MathF.Cos(radY), siny = MathF.Sin(radY);
+            float cosz = MathF.Cos(radZ), sinz = MathF.Sin(radZ);
+
+            //rotate a single vert about 
+            Vector3 RotateVert(Vector3 vert)
+            {
+                //y1 and z1 set after x rot,
+                //x2 and z2 set after y rot,
+                //x3 and y3 set after z rot,
+
+                float y1 = vert.y * cosx - vert.z * sinx;
+                float z1 = vert.y * sinx + vert.z * cosx;
+                float x2 = vert.x * cosy + z1 * siny;
+                float z2 = -vert.x * siny + z1 * cosy;
+                float x3 = x2 * cosz - y1 * sinz;
+                float y3 = x2 * sinz + y1 * cosz;
+                return new Vector3(x3, y3, z2);
+            }
+
             for (int i = 0; i < mesh.indices.Count / 3; i++)
             {
                 //Console.WriteLine($"Baking Tri {i}");
-                var (aRaw, bRaw, cRaw) = mesh.GetTri(i, new Vector3(0, 0, 0));
-                Vector3 a = (aRaw * scale) + position;
-                Vector3 b = (bRaw * scale) + position;
-                Vector3 c = (cRaw * scale) + position;
+                var (aRaw, bRaw, cRaw) = mesh.GetTri(i, new Vector3(0, 0, 0)); //raw is in obj space
+                Vector3 a = RotateVert(aRaw * scale) + position;
+                Vector3 b = RotateVert(bRaw * scale) + position;
+                Vector3 c = RotateVert(cRaw * scale) + position;
 
                 Vector3 normal = Utils.Cross(b - a, c - a).Normalized();
                 Vector3 edgeAB = b - a;

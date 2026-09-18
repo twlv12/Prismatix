@@ -7,12 +7,17 @@ using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 
 namespace Prismatix
 {
+    //TODO:
+    //Fix selection of lamps in outliner
+
     public class Interface
     {
+        #region Vars
         private static IWindow window;
         private static ImGuiController guiController;
         private static GL opengl;
@@ -31,12 +36,32 @@ namespace Prismatix
         private static Scene currScene = null;
         private static int currSceneIndex = 0;
         private static int currObjectIndex = -1;
+        private static int currLampIndex = -1;
         private static int currRenderMode = 1;
+
+        private static string[] hdriFiles = new string[0];
+        private static int currHdriIndex = 0;
 
         public enum Tool {None, Move, Rotate, Scale}
         private static Tool selectedTool = Tool.None;
+        public enum SelectionType { None, Geometry, Lamp }
+        public static int currSelection = (int)SelectionType.None;
+
         private static Vector2 currentViewportSize = new Vector2(1, 1);
         private static Vector2 currentViewportMin = new Vector2(0, 0);
+        private static Vector2 leftClickStartPos = new Vector2(0, 0);
+
+        private static double currDeltaTime = 0.0;
+        private static bool showBvh = false;
+        private static string activeAxis = "";
+
+        private static System.Threading.Tasks.Task<Image> renderTask = null;
+        private static bool isRendering = false;
+        private static Math.Vector3 lastCamPos = new Math.Vector3(0, 0, 0);
+        private static Math.Vector3 lastCamForward = new Math.Vector3(0, 0, 0);
+        private static int lastRenderMode = 1;
+        private static bool needsRender = true;
+        #endregion
 
         public static void Main()
         {
@@ -91,7 +116,6 @@ namespace Prismatix
             newScene.mainCamera.RotateTo(pivot);
         }
 
-
         private static void OnLoad()
         {
             opengl = GL.GetApi(window);
@@ -112,9 +136,19 @@ namespace Prismatix
             });
 
             ImGui.LoadIniSettingsFromMemory(string.Empty);
-            ApplyDarkStyle();
+            SwitchToDark();
 
             Config.Load(Path.Combine(projectDirectory, "Config.json"));
+
+            string hdriPath = Path.Combine(projectDirectory, "HDRIs");
+            if (Directory.Exists(hdriPath))
+            {
+                hdriFiles = Directory.GetFiles(hdriPath, "*.hdr");
+                hdriFiles = hdriFiles.
+                    Concat( Directory.GetFiles(hdriPath, "*.exr") )
+                    .ToArray();
+            }
+
             CreateNewScene();
         }
         private static void OnClose()
@@ -133,6 +167,8 @@ namespace Prismatix
         }
         private static void OnRender(double deltaTime)
         {
+            currDeltaTime = deltaTime;
+
             opengl.ClearColor(0.12f, 0.12f, 0.12f, 1.0f);
             opengl.Clear((uint)(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit));
 
@@ -142,8 +178,46 @@ namespace Prismatix
 
             if (currScene != null && currScene.mainCamera != null)
             {
-                Math.Image renderResult = Renderer.RenderGPU(currScene, currRenderMode);
-                RenderToTexture(renderResult.data, (uint)renderResult.width, (uint)renderResult.height);
+                Camera cam = currScene.mainCamera;
+
+                //if any cam vectoir changed
+                bool camMoved = cam.position.x != lastCamPos.x || 
+                                cam.position.y != lastCamPos.y || 
+                                cam.position.z != lastCamPos.z ||
+                                cam.forward.x != lastCamForward.x || 
+                                cam.forward.y != lastCamForward.y || 
+                                cam.forward.z != lastCamForward.z;
+
+                if (camMoved || currScene.isOutdated || currRenderMode != lastRenderMode)
+                {
+                    lastCamPos = cam.position;
+                    lastCamForward = cam.forward;
+                    lastRenderMode = currRenderMode;
+                    needsRender = true;
+                }
+
+                if (needsRender && !isRendering)
+                {
+                    isRendering = true;
+
+                    Scene capturedScene = currScene;
+                    int capturedMode = currRenderMode;
+
+                    renderTask = System.Threading.Tasks.Task.Run(() =>
+                        Renderer.RenderGPU(capturedScene, capturedMode)
+                    );
+                }
+
+                //if task done push to opengl gpu
+                else if (renderTask != null && renderTask.IsCompleted)
+                {
+                    Image renderResult = renderTask.Result;
+                    RenderToTexture(renderResult.data, (uint)renderResult.width, (uint)renderResult.height);
+
+                    isRendering = false;
+                    needsRender = false;
+                    currScene.isOutdated = false;
+                }
             }
 
             guiController.Update((float)deltaTime);
@@ -196,7 +270,6 @@ namespace Prismatix
                     if (camPitch < -maxPitch) camPitch = -maxPitch;
                 }
             }
-
             //pan right click
             else if (mouse.IsButtonPressed(MouseButton.Right))
             {
@@ -208,60 +281,164 @@ namespace Prismatix
                 }
             }
 
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                leftClickStartPos = mousePos;
+
             //drag left click and hold
-            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) && selectedTool != Tool.None && currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
+            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) && selectedTool != Tool.None)
             {
-                Geometry.Object selectedObj = currScene.objects[currObjectIndex];
 
-                if (selectedTool == Tool.Move)
+                //transform geo
+                if (currSelection == (int)SelectionType.Geometry && currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
                 {
-                    float moveSpeed = 0.002f * camRadius;
-                    Math.Vector3 moveOffset = (currScene.mainCamera.right * delta.X * moveSpeed) - (currScene.mainCamera.up * delta.Y * moveSpeed);
-                    selectedObj.position += moveOffset;
+                    Geometry.Object selObj = currScene.objects[currObjectIndex];
 
-                    selectedObj.needsPrecomp = true;
-                    currScene.BuildBVH();
+                    if (selectedTool == Tool.Move)
+                    {
+                        float snapThreshold = 1.5f;
+
+                        float moveSpeed = 0.002f * camRadius;
+                        Math.Vector3 moveOffset = (currScene.mainCamera.right * delta.X * moveSpeed) - (currScene.mainCamera.up * delta.Y * moveSpeed);
+                        //moveoffset is projected worldspace movement which matches screenspace camera movement
+
+                        float absX = System.Math.Abs(moveOffset.x), absY = System.Math.Abs(moveOffset.y), absZ = System.Math.Abs(moveOffset.z);
+
+                        //snapthreshold works by checking if one axis was moved *snapThreshold more than others, then lockin pos to it.
+                        if (absX > absY * snapThreshold && absX > absZ * snapThreshold){
+                            moveOffset = new Math.Vector3(moveOffset.x, 0, 0);
+                            activeAxis = "X";
+                        }
+                        else if (absY > absX * snapThreshold && absY > absZ * snapThreshold) {
+                            moveOffset = new Math.Vector3(0, moveOffset.y, 0);
+                            activeAxis = "Y";
+                        }
+                        else if (absZ > absX * snapThreshold && absZ > absY * snapThreshold) {
+                            moveOffset = new Math.Vector3(0, 0, moveOffset.z);
+                            activeAxis = "Z";
+                        }
+                        else activeAxis = "";
+
+                        selObj.position += moveOffset;
+                        selObj.needsPrecomp = true;
+                        needsRender = true;
+                    }
+                    else if (selectedTool == Tool.Rotate)
+                    {
+                        float snapThreshold = 0.5f;
+
+                        float rotSpeed = 0.5f;
+                        float rotX = delta.Y * rotSpeed;
+                        float rotY = -delta.X * rotSpeed;
+
+                        if (System.Math.Abs(rotX) > System.Math.Abs(rotY) * snapThreshold) 
+                            rotY = 0;
+                        else if (System.Math.Abs(rotY) > System.Math.Abs(rotX) * snapThreshold) 
+                            rotX = 0;
+
+                        selObj.rotation.x += rotX;
+                        selObj.rotation.y += rotY;
+                        selObj.needsPrecomp = true;
+                    }
+                    else if (selectedTool == Tool.Scale)
+                    {
+                        selObj.scale += (delta.X - delta.Y) * 0.01f;
+                        if (selObj.scale < 0.01f) selObj.scale = 0.01f;
+                        selObj.needsPrecomp = true;
+                    }
                 }
-                else if (selectedTool == Tool.Scale)
-                {
-                    float scaleSpeed = 0.01f;
-                    selectedObj.scale += (delta.X - delta.Y) * scaleSpeed;
-                    if (selectedObj.scale < 0.01f) selectedObj.scale = 0.01f;
 
-                    selectedObj.BakeAllTris();
-                    currScene.BuildBVH();
+                //transform lamps
+                else if (currSelection == (int)SelectionType.Lamp && currLampIndex >= 0 && currLampIndex < currScene.lamps.Count)
+                {
+                    if (selectedTool == Tool.Move)
+                    {
+                        float snapThreshold = 1.5f;
+
+                        float moveSpeed = 0.002f * camRadius;
+                        Math.Vector3 moveOffset = (currScene.mainCamera.right * delta.X * moveSpeed) - (currScene.mainCamera.up * delta.Y * moveSpeed);
+
+                        float absX = System.Math.Abs(moveOffset.x), absY = System.Math.Abs(moveOffset.y), absZ = System.Math.Abs(moveOffset.z);
+                        if (absX > absY * snapThreshold && absX > absZ * snapThreshold)
+                        {
+                            moveOffset = new Math.Vector3(moveOffset.x, 0, 0);
+                            activeAxis = "X";
+                        }
+                        else if (absY > absX * snapThreshold && absY > absZ * snapThreshold)
+                        {
+                            moveOffset = new Math.Vector3(0, moveOffset.y, 0);
+                            activeAxis = "Y";
+                        }
+                        else if (absZ > absX * snapThreshold && absZ > absY * snapThreshold)
+                        {
+                            moveOffset = new Math.Vector3(0, 0, moveOffset.z);
+                            activeAxis = "Z";
+                        }
+                        else activeAxis = "";
+
+                        currScene.lamps[currLampIndex].position += moveOffset;
+                        currScene.isOutdated = true; //need to trigger full rebuild as lamps dont precomp data -no geo
+                    }
                 }
             }
-
             //select left click
             else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
             {
                 Vector2 localMouse = mousePos - currentViewportMin;
-                float relX = localMouse.X / currentViewportSize.X;
-                float relY = (currentViewportSize.Y - localMouse.Y) / currentViewportSize.Y;
-                float targetX = relX * Config.imgWidth;
-                float targetY = relY * Config.imgHeight;
+                float targetX = (localMouse.X / currentViewportSize.X) * Config.imgWidth;
+                float targetY = ((currentViewportSize.Y - localMouse.Y) / currentViewportSize.Y) * Config.imgHeight;
 
                 Camera cam = currScene.mainCamera;
-                HitInfo? closestHit = null;
+                Raycast ray = cam.ShootRay(targetX, targetY);
+
+                float closestDist = float.MaxValue;
+                SelectionType hitType = SelectionType.None;
                 int hitIndex = -1;
 
+                //raycast for geometry hits
                 for (int i = 0; i < currScene.objects.Count; i++)
                 {
+                    if (!currScene.objects[i].isVisible) continue;
                     foreach (Triangle tri in currScene.objects[i].bakedTriangles)
                     {
-                        HitInfo? hit = Utils.GetRayIntersect(cam.ShootRay(targetX, targetY), tri);
-                        if (hit.HasValue)
+                        HitInfo? hit = Utils.GetRayIntersect(ray, tri);
+                        if (hit.HasValue && hit.Value.distance < closestDist)
                         {
-                            if (!closestHit.HasValue || hit.Value.distance < closestHit.Value.distance)
-                            {
-                                closestHit = hit;
-                                hitIndex = i;
-                            }
+                            closestDist = hit.Value.distance;
+                            hitType = SelectionType.Geometry;
+                            hitIndex = i;
                         }
                     }
                 }
-                currObjectIndex = hitIndex;
+                //raycast for lamps, emulate a sphere raycast
+                for (int i = 0; i < currScene.lamps.Count; i++)
+                {
+                    if (!currScene.lamps[i].isVisible) continue;
+
+                    Math.Vector3 vecToLamp = cam.position - currScene.lamps[i].position;
+                    float pointAlongTheVecToLampWhereTheDistanceFromTheVectorPathToSaidLampIsLowest = Math.Utils.Dot(vecToLamp, ray.direction);
+                    float distanceToLamp = Math.Utils.Dot(vecToLamp, vecToLamp) - 0.25f; //radius of lamp
+                    float discriminant = pointAlongTheVecToLampWhereTheDistanceFromTheVectorPathToSaidLampIsLowest * pointAlongTheVecToLampWhereTheDistanceFromTheVectorPathToSaidLampIsLowest - distanceToLamp;
+
+                    if (discriminant > 0.0f)
+                    {
+                        float t = -pointAlongTheVecToLampWhereTheDistanceFromTheVectorPathToSaidLampIsLowest - MathF.Sqrt(discriminant);
+                        if (t > 0.001f && t < closestDist)
+                        {
+                            closestDist = t;
+                            hitType = SelectionType.Lamp;
+                            hitIndex = i;
+                        }
+                    }
+                }
+
+                //set vars to that obj and type
+                currSelection = (int)hitType;
+
+                if (hitType == SelectionType.Geometry) 
+                { currObjectIndex = hitIndex; currLampIndex = -1; }
+                else if (hitType == SelectionType.Lamp) 
+                { currLampIndex = hitIndex; currObjectIndex = -1; }
+                else { currObjectIndex = -1; currLampIndex = -1; }
             }
 
             //zoom scroll
@@ -373,28 +550,128 @@ namespace Prismatix
             CreateLine(new Math.Vector3(0, 0, 0), new Math.Vector3(0, gridSize, 0), colorY, 2.0f); //y
             CreateLine(new Math.Vector3(0, 0, -gridSize), new Math.Vector3(0, 0, gridSize), colorZ, 2.0f); //z
 
+            //lamp markers
+            uint lampColor = ImGui.GetColorU32(new Vector4(1.0f, 0.9f, 0.4f, 1.0f));
+            for (int i = 0; i < currScene.lamps.Count; i++)
+            {
+                if (!currScene.lamps[i].isVisible) continue;
+                Math.Vector3 pos = currScene.lamps[i].position;
+                float size = 0.3f;
+
+                //3d crosshair
+                CreateLine(new Math.Vector3(pos.x - size, pos.y, pos.z), new Math.Vector3(pos.x + size, pos.y, pos.z), lampColor, 2.0f);
+                CreateLine(new Math.Vector3(pos.x, pos.y - size, pos.z), new Math.Vector3(pos.x, pos.y + size, pos.z), lampColor, 2.0f);
+                CreateLine(new Math.Vector3(pos.x, pos.y, pos.z - size), new Math.Vector3(pos.x, pos.y, pos.z + size), lampColor, 2.0f);
+
+                if (currSelection == (int)SelectionType.Lamp && currLampIndex == i)
+                {
+                    CreateLine(new Math.Vector3(pos.x - size, pos.y - size, pos.z), new Math.Vector3(pos.x + size, pos.y + size, pos.z), ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), 1.5f);
+                    CreateLine(new Math.Vector3(pos.x - size, pos.y + size, pos.z), new Math.Vector3(pos.x + size, pos.y - size, pos.z), ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), 1.5f);
+                }
+            }
+
+            //selected obj outline AND GIZMOS draw
             if (currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
             {
                 Geometry.Object selObj = currScene.objects[currObjectIndex];
 
                 //blue wireframe for selected obj
                 uint outlineColor = ImGui.GetColorU32(new Vector4(0.2f, 0.6f, 1.0f, 1.0f));
-                foreach (Triangle tri in selObj.bakedTriangles)
+                foreach (Triangle tri in selObj.bakedTriangles) //FIX THIS 
                 {
                     CreateLine(tri.a, tri.b, outlineColor, 0.5f);
                     CreateLine(tri.b, tri.c, outlineColor, 0.5f);
                     CreateLine(tri.c, tri.a, outlineColor, 0.5f);
                 }
+            }
 
-                //tool gizmos
-                if (selectedTool != Tool.None)
+            //tool gizmos for move, rotate and scale
+            if (selectedTool != Tool.None)
+            {
+                Math.Vector3? gizmoPos = null;
+
+                if (currSelection == (int)SelectionType.Geometry && currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
+                    gizmoPos = currScene.objects[currObjectIndex].position;
+                else if (currSelection == (int)SelectionType.Lamp && currLampIndex >= 0 && currLampIndex < currScene.lamps.Count)
+                    gizmoPos = currScene.lamps[currLampIndex].position;
+
+                if (gizmoPos.HasValue)
                 {
-                    float arrSize = 1.5f;
-                    Math.Vector3 p = selObj.position;
+                    float size = 1.5f;
+                    Math.Vector3 pos = gizmoPos.Value;
 
-                    CreateLine(p, new Math.Vector3(p.x + arrSize, p.y, p.z), ImGui.GetColorU32(new Vector4(1, 0, 0, 1)), 4.0f); //x
-                    CreateLine(p, new Math.Vector3(p.x, p.y + arrSize, p.z), ImGui.GetColorU32(new Vector4(0, 1, 0, 1)), 4.0f); //y
-                    CreateLine(p, new Math.Vector3(p.x, p.y, p.z + arrSize), ImGui.GetColorU32(new Vector4(0, 0, 1, 1)), 4.0f); //z
+                    CreateLine(pos, new Math.Vector3(pos.x + size, pos.y, pos.z), ImGui.GetColorU32(new Vector4(1, 0, 0, 1)), 4.0f); //x red
+                    CreateLine(pos, new Math.Vector3(pos.x, pos.y + size, pos.z), ImGui.GetColorU32(new Vector4(0, 1, 0, 1)), 4.0f); //y green
+                    CreateLine(pos, new Math.Vector3(pos.x, pos.y, pos.z + size), ImGui.GetColorU32(new Vector4(0, 0, 1, 1)), 4.0f); //z blue
+                }
+
+                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) && activeAxis != "")
+                {
+                    Math.Vector3 p = gizmoPos.Value;
+                    if (activeAxis == "X")
+                        CreateLine(new Math.Vector3(-9999f, p.y, p.z), new Math.Vector3(9999f, p.y, p.z), colorX, 1.5f);
+                    if (activeAxis == "Y")
+                        CreateLine(new Math.Vector3(p.x, -9999f, p.z), new Math.Vector3(p.x, 9999f, p.z), colorY, 1.5f);
+                    if (activeAxis == "Z")
+                        CreateLine(new Math.Vector3(p.x, p.y, -9999f), new Math.Vector3(p.x, p.y, 9999f), colorZ, 1.5f);
+                }
+                else
+                {
+                    activeAxis = "";
+                }
+            }
+
+            //draw bvh overlay
+            if (showBvh && currScene.rootBVH != null)
+            {
+                if (showBvh && currScene.rootBVH != null)
+                {
+                    //find bvh max depth for colour interp
+                    //should really do this in the bvh node itself but this is less complex
+                    int GetMaxDepth(BoundingVolume node)
+                    {
+                        if (node == null) return 0;
+                        return 1 + System.Math.Max(GetMaxDepth(node.left), GetMaxDepth(node.right));
+                    }
+                    int maxDepth = GetMaxDepth(currScene.rootBVH);
+
+                    void DrawBVHNode(BoundingVolume node, int depth)
+                    {
+                        if (node == null) return;
+
+                        //interp factor 0 to 1 heading deeper
+                        float t = maxDepth > 1 ? (float)depth / (maxDepth - 1) : 0f;
+
+                        //red to blue
+                        float r = 1.0f - t;
+                        float g = 0.2f;
+                        float b = t;
+                        uint bvhColor = ImGui.GetColorU32(new Vector4(r, g, b, 0.4f));
+
+                        Math.Vector3 min = node.boundsMin;
+                        Math.Vector3 max = node.boundsMax;
+
+                        Math.Vector3 c0 = new Math.Vector3(min.x, min.y, min.z);
+                        Math.Vector3 c1 = new Math.Vector3(max.x, min.y, min.z);
+                        Math.Vector3 c2 = new Math.Vector3(max.x, max.y, min.z);
+                        Math.Vector3 c3 = new Math.Vector3(min.x, max.y, min.z);
+                        Math.Vector3 c4 = new Math.Vector3(min.x, min.y, max.z);
+                        Math.Vector3 c5 = new Math.Vector3(max.x, min.y, max.z);
+                        Math.Vector3 c6 = new Math.Vector3(max.x, max.y, max.z);
+                        Math.Vector3 c7 = new Math.Vector3(min.x, max.y, max.z);
+
+                        CreateLine(c0, c1, bvhColor, 1.0f); CreateLine(c1, c2, bvhColor, 1.0f);
+                        CreateLine(c2, c3, bvhColor, 1.0f); CreateLine(c3, c0, bvhColor, 1.0f);
+                        CreateLine(c4, c5, bvhColor, 1.0f); CreateLine(c5, c6, bvhColor, 1.0f);
+                        CreateLine(c6, c7, bvhColor, 1.0f); CreateLine(c7, c4, bvhColor, 1.0f);
+                        CreateLine(c0, c4, bvhColor, 1.0f); CreateLine(c1, c5, bvhColor, 1.0f);
+                        CreateLine(c2, c6, bvhColor, 1.0f); CreateLine(c3, c7, bvhColor, 1.0f);
+
+                        DrawBVHNode(node.left, depth + 1);
+                        DrawBVHNode(node.right, depth + 1);
+                    }
+
+                    DrawBVHNode(currScene.rootBVH, 0);
                 }
             }
         }
@@ -448,8 +725,16 @@ namespace Prismatix
             currScene = activeScenes.Count > 0 ? activeScenes[currSceneIndex] : null;
             if (currScene != null)
             {
+                int totalVerts = 0, totalTris = 0;
+                foreach (var obj in currScene.objects)
+                {
+                    totalVerts += obj.mesh.vertices.Count;
+                    totalTris += obj.bakedTriangles.Count;
+                }
+
                 ImGui.Text($"Total Objects: {currScene.objects.Count}");
                 ImGui.Text($"Total Lamps: {currScene.lamps.Count}");
+                ImGui.TextDisabled($"Vertices: {totalVerts} | Triangles: {totalTris}");
                 ImGui.Spacing();
 
                 if (currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
@@ -512,23 +797,69 @@ namespace Prismatix
             }
             ImGui.Spacing();
 
+            if (ImGui.Button("Add Point Lamp", new Vector2(-1, 30)))
+            {
+                if (currScene != null)
+                {
+                    // Spawn the lamp slightly above the origin
+                    currScene.AddLamp(new Lamp(new Math.Vector3(0, 2.0f, 0), 50.0f));
+
+                    // Automatically select it!
+                    currSelection = (int)SelectionType.Lamp;
+                    currLampIndex = currScene.lamps.Count - 1;
+                    currObjectIndex = -1;
+
+                    // Alert the GPU
+                    currScene.isOutdated = true;
+                }
+            }
+            ImGui.Spacing();
+
             if (currScene != null)
             {
-                ImGui.TextDisabled("--- Objects ---");
+                ImGui.TextDisabled("--- Geometry ---");
                 for (int i = 0; i < currScene.objects.Count; i++)
-                    if (ImGui.Selectable(currScene.objects[i].name, currObjectIndex == i))
+                {
+                    bool vis = currScene.objects[i].isVisible;
+                    if (ImGui.Checkbox($"##objVis{i}", ref vis))
+                    {
+                        currScene.objects[i].isVisible = vis;
+                        currScene.isOutdated = true; //rebuild 
+                    }
+                    ImGui.SameLine();
+
+                    if (ImGui.Selectable(currScene.objects[i].name, currSelection == (int)SelectionType.Geometry && currObjectIndex == i))
+                    {
+                        currSelection = (int)SelectionType.Geometry;
                         currObjectIndex = i;
+                    }
+                }
 
                 ImGui.Spacing();
                 ImGui.TextDisabled("--- Lamps ---");
                 for (int i = 0; i < currScene.lamps.Count; i++)
-                    ImGui.Selectable(currScene.lamps[i].name, false);
+                {
+                    bool vis = currScene.lamps[i].isVisible;
+                    if (ImGui.Checkbox($"##lampVis{i}", ref vis))
+                    {
+                        currScene.lamps[i].isVisible = vis;
+                        currScene.isOutdated = true; //rebuild
+                    }
+                    ImGui.SameLine();
+
+                    if (ImGui.Selectable($"{currScene.lamps[i].name}##lamp{i}", currSelection == (int)SelectionType.Lamp && currLampIndex == i))
+                    {
+                        currSelection = (int)SelectionType.Lamp;
+                        currLampIndex = i;
+                        currObjectIndex = -1;
+                    }
+                }
             }
 
             ImGui.EndChild();
             #endregion
 
-            ImGui.EndChild(); //end leftcolumn
+            ImGui.EndChild();
             #endregion
 
             ImGui.SameLine();
@@ -550,7 +881,7 @@ namespace Prismatix
             else
             {
                 ImGui.SetCursorPos(new Vector2((currentViewportSize.X * 0.5f) - 100, currentViewportSize.Y * 0.5f));
-                ImGui.Text("GPU Viewport");
+                ImGui.Text("Loading Viewport...");
             }
             isViewportHovered = ImGui.IsItemHovered();
 
@@ -562,13 +893,13 @@ namespace Prismatix
             #region Right Column
             ImGui.BeginChild("RightColumnChild", new Vector2(rightWidth, mainHeight), ImGuiChildFlags.None);
 
-            #region Material Settings
+            #region Material & Properties Settings
             ImGui.BeginChild("MaterialChild", new Vector2(rightWidth, mainHeight * 0.33f), ImGuiChildFlags.Border);
-            ImGui.Text("Selected Object Material");
-            ImGui.Separator();
 
-            if (currScene != null && currObjectIndex >= 0 && currObjectIndex < currScene.objects.Count)
+            if (currScene != null && currSelection == (int)SelectionType.Geometry && currObjectIndex >= 0)
             {
+                ImGui.Text("Material Properties");
+                ImGui.Separator();
                 Geometry.Object selectedObj = currScene.objects[currObjectIndex];
                 Material mat = selectedObj.material;
 
@@ -581,7 +912,7 @@ namespace Prismatix
                 }
 
                 float spec = mat.specular;
-                if (ImGui.SliderFloat("Specular", ref spec, 0.0f, 1.0f))
+                if (ImGui.DragFloat("Specular", ref spec, 0.005f, 0.0f, 1.0f))
                 {
                     mat.specular = spec;
                     selectedObj.needsPrecomp = true;
@@ -589,17 +920,48 @@ namespace Prismatix
                 }
 
                 float rough = mat.roughness;
-                if (ImGui.SliderFloat("Roughness", ref rough, 0.0f, 1.0f))
+                if (ImGui.DragFloat("Roughness", ref rough, 0.005f, 0.0f, 1.0f))
                 {
                     mat.roughness = rough;
                     selectedObj.needsPrecomp = true;
-                    currScene.BuildBVH(); 
+                    currScene.BuildBVH();
+                }
+
+                if (ImGui.Button("Delete Object", new Vector2(-1, 24)))
+                {
+                    currScene.objects.RemoveAt(currObjectIndex);
+                    currSelection = (int)SelectionType.None;
+                    currScene.BuildBVH();
+                    currScene.isOutdated = true;
+                }
+            }
+            else if (currScene != null && currSelection == (int)SelectionType.Lamp && currLampIndex >= 0)
+            {
+                ImGui.Text("Lamp Properties");
+                ImGui.Separator();
+                Lamp selLamp = currScene.lamps[currLampIndex];
+
+                float bright = selLamp.brightness;
+                if (ImGui.DragFloat("Brightness", ref bright, 0.5f, 0.0f, 1000.0f)) 
+                {
+                    selLamp.brightness = bright;
+                    currScene.isOutdated = true;
+                }
+
+                if (ImGui.Button("Delete Lamp", new Vector2(-1, 24)))
+                {
+                    currScene.lamps.RemoveAt(currLampIndex);
+                    currSelection = (int)SelectionType.None;
+                    currScene.isOutdated = true;
                 }
             }
             else
             {
-                ImGui.TextDisabled("No object selected.");
+                ImGui.Text("Properties");
+                ImGui.Separator();
+                ImGui.TextDisabled("No item selected.");
             }
+
             ImGui.EndChild();
             #endregion
 
@@ -607,42 +969,105 @@ namespace Prismatix
             ImGui.BeginChild("WorldChild", new Vector2(rightWidth, mainHeight * 0.33f), ImGuiChildFlags.Border);
             ImGui.Text("Environment Settings");
             ImGui.Separator();
+
             System.Numerics.Vector3 bgColor = new System.Numerics.Vector3(Config.bgColour[0] / 255f, Config.bgColour[1] / 255f, Config.bgColour[2] / 255f);
             if (ImGui.ColorEdit3("Background Colour", ref bgColor))
             {
                 Config.bgColour[0] = (int)(bgColor.X * 255);
                 Config.bgColour[1] = (int)(bgColor.Y * 255);
                 Config.bgColour[2] = (int)(bgColor.Z * 255);
+                needsRender = true;
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+
+            if (currScene != null)
+            {
+                bool isHdriEnabled = currScene.useHdri;
+                if (ImGui.Checkbox("Enable HDRI", ref isHdriEnabled))
+                {
+                    currScene.useHdri = isHdriEnabled;
+
+                    if (isHdriEnabled && currScene.hdriWidth == 1 && hdriFiles.Length > 0)
+                    {
+                        currHdriIndex = 0;
+                        currScene.SetHDRI(hdriFiles[0]);
+                    }
+                }
+
+                if (ImGui.SliderFloat("HDRI Intensity", ref currScene.hdriIntensity, 0.0f, 10.0f))
+                    currScene.isOutdated = true;
+
+                if (hdriFiles.Length > 0)
+                {
+                    string[] hdriNames = new string[hdriFiles.Length];
+                    for (int i = 0; i < hdriFiles.Length; i++)
+                        hdriNames[i] = Path.GetFileName(hdriFiles[i]);
+
+                    if (ImGui.Combo("Select HDRI", ref currHdriIndex, hdriNames, hdriNames.Length))
+                    {
+                        currScene.SetHDRI(hdriFiles[currHdriIndex]);
+                        currScene.useHdri = true;
+                        needsRender = true;
+                    }
+                }
+                else
+                {
+                    ImGui.TextDisabled("No .hdr files in /HDRIs/");
+                }
             }
             ImGui.EndChild();
             #endregion
 
             #region Render Settings
             ImGui.BeginChild("RenderChild", new Vector2(rightWidth, mainHeight * 0.34f), ImGuiChildFlags.Border);
-            ImGui.Text("Path Tracer Configuration");
+            ImGui.Text("Renderer Configuration");
+
+            double fps = currDeltaTime > 0 ? 1.0 / currDeltaTime : 0;
+            ImGui.TextDisabled($"Performance: {(currDeltaTime * 1000).ToString("0.00")} ms ({fps.ToString("0")} FPS)");
+
             ImGui.Separator();
             int samples = Config.maxSamples;
             int depth = Config.maxRayDepth;
-            if (ImGui.SliderInt("Max Samples", ref samples, 1, 1024)) Config.maxSamples = samples;
-            if (ImGui.SliderInt("Ray Depth", ref depth, 1, 16)) Config.maxRayDepth = depth;
+
+            //dragint better scaling
+            if (ImGui.DragInt("Max Samples", ref samples, 1f, 1, 256)) { 
+                Config.maxSamples = samples;
+                needsRender = true;
+            }
+            if (ImGui.DragInt("Ray Depth", ref depth, 0.1f, 1, 16)) { 
+                Config.maxRayDepth = depth;
+                needsRender = true;
+            }
+
             ImGui.EndChild();
             #endregion
 
-            ImGui.EndChild(); //end rightcolumn
+            ImGui.EndChild();
             #endregion
 
             #region Bottom Bar
             ImGui.BeginChild("BottomStripChild", new Vector2(vpSize.X, bottomHeight), ImGuiChildFlags.Border);
-            if (ImGui.Button("Depth")) { currRenderMode = 4; }
+
+            //draw the highlighted button if its selected
+            void RenderModeBtn(string label, int mode)
+            {
+                if (currRenderMode == mode) ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive));
+                if (ImGui.Button(label)) currRenderMode = mode;
+                if (currRenderMode == mode) ImGui.PopStyleColor();
+                ImGui.SameLine();
+            }
+
+            RenderModeBtn("Depth", 4);
+            RenderModeBtn("Normal", 1);
+            RenderModeBtn("Diffuse", 3);
+            RenderModeBtn("Traced", 2);
+
             ImGui.SameLine();
-            if (ImGui.Button("Normal")) { currRenderMode = 1; }
-            ImGui.SameLine();
-            if (ImGui.Button("Diffuse")) { currRenderMode = 3; }
-            ImGui.SameLine();
-            if (ImGui.Button("Traced")) { currRenderMode = 2; }
-            ImGui.SameLine();
-            bool showBvh = false;
+
             ImGui.Checkbox("BVH Overlay", ref showBvh);
+
             ImGui.SameLine();
             ImGui.Text(" | Tools: ");
             ImGui.SameLine();
@@ -659,7 +1084,7 @@ namespace Prismatix
 
             ImGui.End();
         }
-        private static void ApplyLightStyle()
+        private static void SwitchToLight()
         {
             var style = ImGui.GetStyle();
 
@@ -720,7 +1145,7 @@ namespace Prismatix
                 colors[(int)ImGuiCol.ModalWindowDimBg] = new Vector4(1.00f, 0.98f, 0.95f, 0.73f);
             }
         }
-        private static void ApplyDarkStyle()
+        private static void SwitchToDark()
         {
             var style = ImGui.GetStyle();
 

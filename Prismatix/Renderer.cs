@@ -5,8 +5,6 @@ using Prismatix.Shaders;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Threading.Tasks;
 using SysMath = System.Math; //fixing ambugiuity with own prismatix.math
 
 namespace Prismatix
@@ -18,6 +16,7 @@ namespace Prismatix
         private static ReadOnlyBuffer<GPUTriangle> gpuTris;
         private static ReadOnlyBuffer<GPULamp> gpuLamps;
         private static ReadWriteTexture2D<uint> gpuImage;
+        private static ReadOnlyTexture2D<float4> gpuHdri;
 
         //CPU buffers (for pythno)
         private static byte[] rawPixelData;
@@ -34,20 +33,34 @@ namespace Prismatix
 
             //precompute and check if gpu buffers need to be rebuilt (if scene changed)
             foreach (var obj in scene.objects)
-            {
                 if (obj.needsPrecomp)
                 {
                     obj.BakeAllTris();
                     obj.needsPrecomp = false;
                     needsGPUTransmit = true;
                 }
-            }
 
             //only need to rebuild genometry buffers if scene changed
-            if (needsGPUTransmit || gpuNodes == null)
+            if (needsGPUTransmit || gpuNodes == null || scene.isOutdated)
             {
                 scene.BuildBVH();
                 var (nodesArr, trisArr) = scene.GPUifyBVH();
+
+                //previously added an empty bounds from 0,0,0 to 0,0,0, as well as a lamp at 0,
+                //causing light falloff calc of distance to div by 0, causing crash when zero objects.
+
+                if (nodesArr.Length == 0)
+                {
+                    nodesArr = new GPUNode[] 
+                    { new GPUNode { //random bounds to prevent any division weirdness
+                            boundsMin = new Math.Vector3(23132f, 32142f, 12512f),
+                            boundsMax = new Math.Vector3(-12124f, -63721f, -12562f),
+                            leftChild = -1, rightChild = -1, triCount = 0
+                        } };
+                }
+                if (trisArr.Length == 0){
+                    trisArr = new GPUTriangle[1];
+                }
 
                 //flatten data to value types for gpu
                 Shaders.GPULamp[] flatLamps = new Shaders.GPULamp[scene.lamps.Count];
@@ -55,8 +68,19 @@ namespace Prismatix
                     flatLamps[i] = new Shaders.GPULamp
                     {
                         position = scene.lamps[i].position,
-                        brightness = scene.lamps[i].brightness
+                        brightness = scene.lamps[i].isVisible ? scene.lamps[i].brightness : 0.0f
                     };
+
+                if (flatLamps.Length == 0)
+                {
+                    flatLamps = new Shaders.GPULamp[] {
+                        new Shaders.GPULamp {
+                            //move lamp somewhere random to prevent NAN div
+                            position = new Math.Vector3(0, 32132f, 0),
+                            brightness = 0.0f
+                        }
+                    };
+                }
 
                 //remove old and create new gpu vram buffers
                 gpuNodes?.Dispose();
@@ -65,6 +89,8 @@ namespace Prismatix
                 gpuNodes = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(nodesArr);
                 gpuTris = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(trisArr);
                 gpuLamps = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(flatLamps);
+
+                scene.isOutdated = false;
             }
 
             //only need to rebuild image and bytearr buffers if resolution changed
@@ -75,18 +101,27 @@ namespace Prismatix
                 gpuDownloadBuffer = new uint[width * height];
                 rawPixelData = new byte[width * height * 3]; 
             }
+
+            if (gpuHdri == null || scene.hdriOutdated)
+            {
+                gpuHdri?.Dispose();
+                gpuHdri = GraphicsDevice.GetDefault().AllocateReadOnlyTexture2D<float4>(scene.hdriWidth, scene.hdriHeight);
+                gpuHdri.CopyFrom(scene.hdriArray);
+                scene.hdriOutdated = false;
+            }
             #endregion
 
             float3 bgColour = new float3(
                 Config.bgColour[0] / 255f,
                 Config.bgColour[1] / 255f,
                 Config.bgColour[2] / 255f);
+
             var shader = new Shaders.Shader(
                 gpuNodes, gpuTris, gpuLamps, gpuImage,
                 renderMode, Config.maxSamples, Config.maxRayDepth, bgColour,
                 scene.mainCamera.position, scene.mainCamera.origin,
                 scene.mainCamera.horizontal, scene.mainCamera.vertical,
-                width, height
+                width, height, gpuHdri, scene.useHdri, (uint)Environment.TickCount, scene.hdriIntensity
             );
 
             //GO GPU! and retrieve once done
@@ -134,7 +169,6 @@ namespace Prismatix
                 }
             }
             else
-            {
                 //info why bitpacking in CShaders.cs
                 for (int i = 0; i < gpuDownloadBuffer.Length; i++)
                 {
@@ -143,7 +177,6 @@ namespace Prismatix
                     rawPixelData[byteIndex++] = (byte)((packedColour >> 8) & 0xFF);  //second 8
                     rawPixelData[byteIndex++] = (byte)((packedColour >> 16) & 0xFF); //third 8
                 }
-            }
             
             Image output = new Image(width, height);
             output.data = rawPixelData;
@@ -315,5 +348,4 @@ namespace Prismatix
         }
         #endregion
     }
-
 }

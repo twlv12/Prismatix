@@ -1,6 +1,5 @@
 using ComputeSharp;
-using Prismatix.Math;
-using System.Collections.Generic;
+using SysMath = System.Math;
 
 namespace Prismatix.Shaders
 {
@@ -91,6 +90,7 @@ namespace Prismatix.Shaders
     public struct GPUTriangle
     {
         public float3 a, b, c;
+        public float2 texA, texB, texC;
         public float3 normal;
         public float3 colour;
     }
@@ -101,6 +101,9 @@ namespace Prismatix.Shaders
         public float3 normal;
         public float distance;
         public float3 colour;
+        public float2 tex;
+        public float roughness;
+        public float metallic;
     }
 
     public struct GPUNode
@@ -131,12 +134,16 @@ namespace Prismatix.Shaders
         public readonly ReadOnlyBuffer<GPUTriangle> triangles;
         public readonly ReadOnlyBuffer<GPULamp> lamps;
         public readonly ReadWriteTexture2D<uint> outputImage;
+        public readonly ReadOnlyTexture2D<float4> hdriTexture;
+        public readonly bool useHdri;
+        public readonly float hdriIntensity;
 
         //GPU will not be able to access any c# obj data, so must pass in here now
         public readonly int renderMode; //0 depth, 1 normal, 2 diffuse, 3 traced
         public readonly int maxSamples;
         public readonly int maxRayDepth;
         public readonly float3 bgColour;
+        public readonly uint frameSeed;
 
         public readonly float3 camPos;
         public readonly float3 camOrigin;
@@ -147,12 +154,16 @@ namespace Prismatix.Shaders
 
         public Shader (ReadOnlyBuffer<GPUNode> bvhNodes, ReadOnlyBuffer<GPUTriangle> triangles, ReadOnlyBuffer<GPULamp> lamps, ReadWriteTexture2D<uint> outputImage,
             int renderMode, int maxSamples, int maxRayDepth, float3 bgColour,
-            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height) 
+            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity) 
         {
             this.bvhNodes = bvhNodes; this.triangles = triangles; this.lamps = lamps; this.outputImage = outputImage;
             this.renderMode = renderMode; this.maxSamples = maxSamples; this.maxRayDepth = maxRayDepth; this.bgColour = bgColour;
             this.camPos = camPos; this.camOrigin = camOrigin; this.camHorizontal = camHorizontal; this.camVertical = camVertical;
             this.width = width; this.height = height;
+            this.hdriTexture = hdriTexture;
+            this.useHdri = useHdri;
+            this.frameSeed = frameSeed * 100;
+            this.hdriIntensity = hdriIntensity;
         }
 
         //the gpu cant use the default c# random lib,
@@ -189,7 +200,7 @@ namespace Prismatix.Shaders
         {
             int x = ThreadIds.X;
             int y = ThreadIds.Y;
-            uint seed = (uint)((y * width) + x);
+            uint seed = (uint)((y * width) + x) + frameSeed;
 
             float3 totalColour = new float3(0,0,0);
             int samples = (renderMode == 2) ? maxSamples : 1;
@@ -244,7 +255,23 @@ namespace Prismatix.Shaders
 
                         if (!hasHit)
                         {
-                            currentLight += lightColour * linearBg;
+                            if (useHdri)
+                            {
+                                float u = 0.5f + (Hlsl.Atan2(rayDir.Z, rayDir.X) / (2.0f * (float)SysMath.PI));
+                                float v = 0.5f - (Hlsl.Asin(rayDir.Y) / (float)SysMath.PI);
+
+                                int texX = (int)(u * hdriTexture.Width);
+                                int texY = (int)(v * hdriTexture.Height);
+
+                                float3 skyColor = hdriTexture[new int2(texX, texY)].XYZ;
+                                skyColor *= hdriIntensity;
+                                skyColor = Hlsl.Clamp(skyColor, 0.0f, 10.0f);
+                                currentLight += lightColour * skyColor;
+                            }
+                            else{
+
+                                currentLight += lightColour * linearBg;
+                            }
                             break;
                         }
 
@@ -270,12 +297,24 @@ namespace Prismatix.Shaders
                                 directLight += hit.colour * intensity * diffToLight;
                             }
                         }
-
                         currentLight += lightColour * directLight;
+
+                        float3 diffuse = Hlsl.Normalize(hit.normal + RandomVector(ref seed));
+
+                        //blend between a completely random vector and total reflection baseed on roughness
+                        float3 specularBounce = Hlsl.Lerp( //linear interp
+                            Hlsl.Reflect(rayDir, hit.normal),
+                            diffuse, 
+                            hit.roughness);
+
+                        //determine whether ray is specular - metallic materials have higher chance of specular bounce
+                        //splitting rays into diffuse and specular every bounce would be expensive,
+                        //so we rely on monte-carlo mixing these together.
+                        bool isSpecular = RandomFloat(ref seed) < hit.metallic;
 
                         //set values for next ray
                         rayOrigin = hit.point + hit.normal * 0.001f;
-                        rayDir = Hlsl.Normalize(hit.normal + RandomVector(ref seed));
+                        rayDir = isSpecular ? specularBounce : diffuse;
                         invDir = 1.0f / rayDir;
 
                         lightColour *= hit.colour;
@@ -327,6 +366,7 @@ namespace Prismatix.Shaders
                 } //depth
             }
 
+            //color transformation (reinhard, sRGB)
             float3 finalColour = totalColour / (float)samples;
             if (renderMode == 2 || renderMode == 3)
             {
@@ -335,7 +375,6 @@ namespace Prismatix.Shaders
                 //colour transform from raw to sRGB 0-255
                 finalColour = Hlsl.Sqrt(finalColour);
             }
-
             if (renderMode == 4)
             {
                 //force return raw depth data for depth mode
@@ -485,6 +524,7 @@ namespace Prismatix.Shaders
             hit = true;
             hitInfo.distance = distance;
             hitInfo.point = rayOrigin + rayDir * distance;
+            hitInfo.tex = tri.texA * (1 - baryB - baryC) + tri.texB * baryB + tri.texC * baryC;
             hitInfo.normal = Hlsl.Dot(rayDir, tri.normal) > 0 ? -tri.normal : tri.normal;
             hitInfo.colour = tri.colour;
         }
