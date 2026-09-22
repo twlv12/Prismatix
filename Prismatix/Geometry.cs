@@ -22,6 +22,10 @@ namespace Prismatix.Geometry
         public float4[] hdriArray = { new float4(0, 0, 0, 1) };
         public float hdriIntensity = 1.0f;
 
+        public ComputeSharp.Float4[] gpuTextureAtlas = 
+            new ComputeSharp.Float4[] 
+        { new ComputeSharp.Float4(0, 0, 0, 0) };
+
         public Scene(){
             BuildBVH();
         }
@@ -67,13 +71,24 @@ namespace Prismatix.Geometry
 
         public void BuildBVH()
         {
+            List<ComputeSharp.Float4> textureAtlasArr = new List<ComputeSharp.Float4>();
+            textureAtlasArr.Add(new ComputeSharp.Float4(1, 1, 1, 1));
+
             List<Triangle> listOfAllTris = new List<Triangle>();
-            foreach (Object obj in objects){
+            foreach (Object obj in objects)
+            {
                 if (!obj.isVisible) continue; //can simply exclude hidden objects from bvh to disable rendering them.
+
                 foreach (Triangle tri in obj.bakedTriangles){
                     listOfAllTris.Add(tri);
                 }
+
+                if (obj.material.hasTexture){
+                    obj.material.textureOffset = textureAtlasArr.Count;
+                    textureAtlasArr.AddRange(obj.material.textureCoordsArray);
+                }
             }
+            gpuTextureAtlas = textureAtlasArr.ToArray();
 
             if (listOfAllTris.Count > 0)
                 rootBVH = new BoundingVolume(listOfAllTris, 0);
@@ -130,7 +145,15 @@ namespace Prismatix.Geometry
                         b = tri.b,
                         c = tri.c,
                         normal = tri.normal,
-                        colour = tri.hostObj.material.colour
+                        colour = tri.hostObj.material.colour,
+                        roughness = tri.hostObj.material.roughness,
+                        metallic = tri.hostObj.material.metallic,
+                        texA = tri.texA,
+                        texB = tri.texB,
+                        texC = tri.texC,
+                        textureOffset = tri.hostObj.material.hasTexture ? tri.hostObj.material.textureOffset : 0,
+                        textureWidth = tri.hostObj.material.textureWidth,
+                        textureHeight = tri.hostObj.material.textureHeight
                     });
                 }
             }
@@ -169,6 +192,8 @@ namespace Prismatix.Geometry
         #region Mesh Data
         public List<Vector3> vertices = new List<Vector3>(); //hold all sequential vertex positions
         public List<int> indices = new List<int>(); //list of index numbers referring to vertices
+        public List<ComputeSharp.Float2> uvs = new List<ComputeSharp.Float2>();
+        public List<int> uvIndices = new List<int>();
 
         //each 3 ints represents a tri
 
@@ -190,6 +215,14 @@ namespace Prismatix.Geometry
                 offset + vertices[indices[i+1]],
                 offset + vertices[indices[i+2]]
             );
+        }
+
+        public (ComputeSharp.Float2, ComputeSharp.Float2, ComputeSharp.Float2) GetUVs(int index)
+        {
+            int i = index * 3;
+            if (uvIndices.Count > i + 2 && uvIndices[i] != -1)
+                return (uvs[uvIndices[i]], uvs[uvIndices[i + 1]], uvs[uvIndices[i + 2]]);
+            return (new ComputeSharp.Float2(0, 0), new ComputeSharp.Float2(0, 0), new ComputeSharp.Float2(0, 0));
         }
     }
 
@@ -213,10 +246,9 @@ namespace Prismatix.Geometry
         }
         #endregion
 
-
         public void BakeAllTris()
         {
-            bakedTriangles.Clear();
+            List<Triangle> newBakedTriangles = new List<Triangle>();
 
             //precompute convert degrees to radians for use in euler rotation
             float radX = rotation.x * (MathF.PI / 180f);
@@ -257,7 +289,9 @@ namespace Prismatix.Geometry
                 Vector3 center = (a + b + c) / 3;
                 //Console.WriteLine($"Baked Tri {a},{b},{c}");
 
-                bakedTriangles.Add(new Triangle
+                var (texA, texB, texC) = mesh.GetUVs(i);
+
+                newBakedTriangles.Add(new Triangle
                 {
                     a = a,
                     b = b,
@@ -267,8 +301,13 @@ namespace Prismatix.Geometry
                     edgeAC = edgeAC,
                     center = center,
                     hostObj = this,
+                    texA = texA,
+                    texB = texB,
+                    texC = texC
                 });
             }
+
+            bakedTriangles = newBakedTriangles;
         }
     }
 
@@ -278,12 +317,39 @@ namespace Prismatix.Geometry
         public Vector3 colour;
         public float specular;
         public float roughness;
+        public float metallic;
 
-        public Material(string nam, Vector3 col, float spec, float ruf){
-            name = nam;
-            colour = col;
-            specular = spec;
-            roughness = ruf;
+        public bool hasTexture = false;
+        public int textureOffset = 0;
+        public int textureWidth = 0;
+        public int textureHeight = 0; //coords array has width and height for RGBA channel img
+        public ComputeSharp.Float4[] textureCoordsArray = new ComputeSharp.Float4[0];
+
+        public Material(string nam, Vector3 col, float spec, float ruf, float met = 0.0f)
+        {
+            name = nam; colour = col; specular = spec; roughness = ruf; metallic = met;
+        }
+
+        public void LoadTexture(string path)
+        {
+            using (Stream stream = File.OpenRead(path))
+            {
+                var image = StbImageSharp.ImageResultFloat.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+                textureWidth = image.Width;
+                textureHeight = image.Height;
+                textureCoordsArray = new ComputeSharp.Float4[textureWidth * textureHeight];
+
+                //populate the array with RGBA vals (index times 4 plus int for R G B A)
+                for (int i = 0; i < textureWidth * textureHeight; i++)
+                {
+                    textureCoordsArray[i] = new ComputeSharp.Float4(
+                        image.Data[i * 4 + 0], //R
+                        image.Data[i * 4 + 1], //G
+                        image.Data[i * 4 + 2], //B
+                        image.Data[i * 4 + 3]);//A
+                }
+            }
+            hasTexture = true;
         }
     }
 
@@ -310,7 +376,6 @@ namespace Prismatix.Geometry
                 {
                     name = $"{cleanLine.Substring(2)}";
                 }
-
                 else if (cleanLine.StartsWith("v ") && !cleanLine.StartsWith("vn"))
                 {
                     string[] splitLine = cleanLine.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -322,7 +387,6 @@ namespace Prismatix.Geometry
 
                     mesh.vertices.Add(vector3);
                 }
-
                 else if (cleanLine.StartsWith("f")) //each face is three ints referring to
                 {                              //indexes of vertices in the vertex list
                     string[] splitLine = cleanLine.Split(' ');
@@ -330,8 +394,18 @@ namespace Prismatix.Geometry
                     {
                         string[] parts = splitLine[i].Split(new[] { ' ', '/' }, StringSplitOptions.RemoveEmptyEntries);
                         int vertIndex = int.Parse(parts[0]) - 1; //obj indexing starts at 1
-                        mesh.indices.Add(vertIndex);
+                        mesh.indices.Add(int.Parse(parts[0]) - 1);
+
+                        if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1])) //if the parts has the uv index (f 1/3/4)
+                            mesh.uvIndices.Add(int.Parse(parts[1]) - 1);
+                        else
+                            mesh.uvIndices.Add(-1);
                     }
+                }
+                else if (cleanLine.StartsWith("vt "))
+                {
+                    string[] splitLine = cleanLine.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    mesh.uvs.Add(new ComputeSharp.Float2(float.Parse(splitLine[1]), float.Parse(splitLine[2])));
                 }
                 #endregion
 

@@ -903,28 +903,57 @@ namespace Prismatix
                 Geometry.Object selectedObj = currScene.objects[currObjectIndex];
                 Material mat = selectedObj.material;
 
+                if (ImGui.Button("Load Texture", new Vector2(-1, 24)))
+                    ImGui.OpenPopup("LoadTexPopup");
+
+                if (ImGui.BeginPopup("LoadTexPopup"))
+                {
+                    string texPath = Path.Combine(projectDirectory, "Textures");
+                    if (Directory.Exists(texPath))
+                    {
+                        foreach (string file in Directory.GetFiles(texPath, "*.*"))
+                        {
+                            if (ImGui.Selectable(Path.GetFileName(file)))
+                            {
+                                selectedObj.material.LoadTexture(file);
+                                selectedObj.needsPrecomp = true;
+                                needsRender = true;
+                            }
+                        }
+                    }
+                    ImGui.EndPopup();
+                }
+
                 System.Numerics.Vector3 albedoColor = new System.Numerics.Vector3(mat.colour.x, mat.colour.y, mat.colour.z);
                 if (ImGui.ColorEdit3("Diffuse", ref albedoColor))
                 {
                     mat.colour = new Math.Vector3(albedoColor.X, albedoColor.Y, albedoColor.Z);
                     selectedObj.needsPrecomp = true;
                     currScene.BuildBVH();
+                    needsRender = true;
                 }
-
                 float spec = mat.specular;
                 if (ImGui.DragFloat("Specular", ref spec, 0.005f, 0.0f, 1.0f))
                 {
                     mat.specular = spec;
                     selectedObj.needsPrecomp = true;
                     currScene.BuildBVH();
+                    needsRender = true;
                 }
-
                 float rough = mat.roughness;
                 if (ImGui.DragFloat("Roughness", ref rough, 0.005f, 0.0f, 1.0f))
                 {
                     mat.roughness = rough;
                     selectedObj.needsPrecomp = true;
                     currScene.BuildBVH();
+                    needsRender = true;
+                }
+                float met = mat.metallic;
+                if (ImGui.DragFloat("Metallic", ref met, 0.005f, 0.0f, 1.0f))
+                {
+                    mat.metallic = met;
+                    selectedObj.needsPrecomp = true;
+                    needsRender = true;
                 }
 
                 if (ImGui.Button("Delete Object", new Vector2(-1, 24)))

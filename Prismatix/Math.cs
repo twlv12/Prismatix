@@ -78,6 +78,7 @@ namespace Prismatix.Math
         public Vector3 normal;
         public Vector3 center;
         public Geometry.Object hostObj;
+        public ComputeSharp.Float2 texA, texB, texC;
     }
 
     public class Image

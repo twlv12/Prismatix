@@ -93,6 +93,11 @@ namespace Prismatix.Shaders
         public float2 texA, texB, texC;
         public float3 normal;
         public float3 colour;
+        public float roughness;
+        public float metallic;
+        public int textureOffset, 
+            textureWidth, 
+            textureHeight;
     }
 
     public struct GPUHitInfo
@@ -104,6 +109,9 @@ namespace Prismatix.Shaders
         public float2 tex;
         public float roughness;
         public float metallic;
+        public int textureOffset, 
+            textureWidth, 
+            textureHeight;
     }
 
     public struct GPUNode
@@ -135,6 +143,7 @@ namespace Prismatix.Shaders
         public readonly ReadOnlyBuffer<GPULamp> lamps;
         public readonly ReadWriteTexture2D<uint> outputImage;
         public readonly ReadOnlyTexture2D<float4> hdriTexture;
+        public readonly ReadOnlyBuffer<float4> textureAtlas;
         public readonly bool useHdri;
         public readonly float hdriIntensity;
 
@@ -154,16 +163,18 @@ namespace Prismatix.Shaders
 
         public Shader (ReadOnlyBuffer<GPUNode> bvhNodes, ReadOnlyBuffer<GPUTriangle> triangles, ReadOnlyBuffer<GPULamp> lamps, ReadWriteTexture2D<uint> outputImage,
             int renderMode, int maxSamples, int maxRayDepth, float3 bgColour,
-            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity) 
+            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity, ReadOnlyBuffer<float4> textureAtlas) 
         {
             this.bvhNodes = bvhNodes; this.triangles = triangles; this.lamps = lamps; this.outputImage = outputImage;
             this.renderMode = renderMode; this.maxSamples = maxSamples; this.maxRayDepth = maxRayDepth; this.bgColour = bgColour;
             this.camPos = camPos; this.camOrigin = camOrigin; this.camHorizontal = camHorizontal; this.camVertical = camVertical;
             this.width = width; this.height = height;
             this.hdriTexture = hdriTexture;
+            this.textureAtlas = textureAtlas;
             this.useHdri = useHdri;
             this.frameSeed = frameSeed * 100;
             this.hdriIntensity = hdriIntensity;
+
         }
 
         //the gpu cant use the default c# random lib,
@@ -196,7 +207,7 @@ namespace Prismatix.Shaders
         }
 
         //this func is essentially parallel.for previously
-        public void Execute()
+        public void Execute() //PER PIXEL
         {
             int x = ThreadIds.X;
             int y = ThreadIds.Y;
@@ -205,7 +216,7 @@ namespace Prismatix.Shaders
             float3 totalColour = new float3(0,0,0);
             int samples = (renderMode == 2) ? maxSamples : 1;
 
-            for (int sample = 0; sample < samples; sample++)
+            for (int sample = 0; sample < samples; sample++) //PER SAMPLE
             {
                 //ensure that random doesnt ouput same for every sample
                 NextRandom(ref seed);
@@ -275,6 +286,20 @@ namespace Prismatix.Shaders
                             break;
                         }
 
+                        float3 albedo = hit.colour;
+                        if (hit.textureWidth > 0 && hit.textureHeight > 0)
+                        {
+                            //subtract floor to remove any integer value leave only decimal, wrap around
+                            float u = hit.tex.X - Hlsl.Floor(hit.tex.X);
+                            float v = hit.tex.Y - Hlsl.Floor(hit.tex.Y);
+                            v = 1.0f - v;
+                            int px = (int)(u * (hit.textureWidth - 1));
+                            int py = (int)(v * (hit.textureHeight - 1));
+
+                            int index = hit.textureOffset + (py * hit.textureWidth + px);
+                            albedo = textureAtlas[index].XYZ;
+                        }
+
                         //tally up the direct lighting from all lamps
                         float3 directLight = new float3(0, 0, 0);
                         for (int i = 0; i < lamps.Length; i++)
@@ -294,7 +319,7 @@ namespace Prismatix.Shaders
                                 float diffToLight = Hlsl.Max(0.0f, Hlsl.Dot(hit.normal, dirToLamp));
                                 float intensity = lamps[i].brightness / (distToLamp * distToLamp);
 
-                                directLight += hit.colour * intensity * diffToLight;
+                                directLight += albedo * intensity * diffToLight;
                             }
                         }
                         currentLight += lightColour * directLight;
@@ -317,7 +342,7 @@ namespace Prismatix.Shaders
                         rayDir = isSpecular ? specularBounce : diffuse;
                         invDir = 1.0f / rayDir;
 
-                        lightColour *= hit.colour;
+                        lightColour *= albedo;
                     }
 
                     totalColour += currentLight;
@@ -525,6 +550,9 @@ namespace Prismatix.Shaders
             hitInfo.distance = distance;
             hitInfo.point = rayOrigin + rayDir * distance;
             hitInfo.tex = tri.texA * (1 - baryB - baryC) + tri.texB * baryB + tri.texC * baryC;
+            hitInfo.textureOffset = tri.textureOffset;
+            hitInfo.textureWidth = tri.textureWidth;
+            hitInfo.textureHeight = tri.textureHeight;
             hitInfo.normal = Hlsl.Dot(rayDir, tri.normal) > 0 ? -tri.normal : tri.normal;
             hitInfo.colour = tri.colour;
         }

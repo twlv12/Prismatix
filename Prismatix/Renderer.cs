@@ -17,6 +17,7 @@ namespace Prismatix
         private static ReadOnlyBuffer<GPULamp> gpuLamps;
         private static ReadWriteTexture2D<uint> gpuImage;
         private static ReadOnlyTexture2D<float4> gpuHdri;
+        private static ReadOnlyBuffer<float4> gpuTexture;
 
         //CPU buffers (for pythno)
         private static byte[] rawPixelData;
@@ -51,7 +52,7 @@ namespace Prismatix
 
                 if (nodesArr.Length == 0)
                 {
-                    nodesArr = new GPUNode[] 
+                    nodesArr = new GPUNode[]
                     { new GPUNode { //random bounds to prevent any division weirdness
                             boundsMin = new Math.Vector3(23132f, 32142f, 12512f),
                             boundsMax = new Math.Vector3(-12124f, -63721f, -12562f),
@@ -93,6 +94,12 @@ namespace Prismatix
                 scene.isOutdated = false;
             }
 
+            if (needsGPUTransmit || gpuTexture == null || scene.isOutdated)
+            {
+                gpuTexture?.Dispose();
+                gpuTexture = GraphicsDevice.GetDefault().AllocateReadOnlyBuffer(scene.gpuTextureAtlas);
+            }
+
             //only need to rebuild image and bytearr buffers if resolution changed
             if (gpuImage == null || gpuImage.Width != width || gpuImage.Height != height)
             {
@@ -109,6 +116,7 @@ namespace Prismatix
                 gpuHdri.CopyFrom(scene.hdriArray);
                 scene.hdriOutdated = false;
             }
+
             #endregion
 
             float3 bgColour = new float3(
@@ -121,7 +129,7 @@ namespace Prismatix
                 renderMode, Config.maxSamples, Config.maxRayDepth, bgColour,
                 scene.mainCamera.position, scene.mainCamera.origin,
                 scene.mainCamera.horizontal, scene.mainCamera.vertical,
-                width, height, gpuHdri, scene.useHdri, (uint)Environment.TickCount, scene.hdriIntensity
+                width, height, gpuHdri, scene.useHdri, (uint)Environment.TickCount, scene.hdriIntensity, gpuTexture
             );
 
             //GO GPU! and retrieve once done
