@@ -1,9 +1,10 @@
 ﻿using Prismatix.Math;
 using Prismatix.Shaders;
+using StbImageSharp;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using StbImageSharp;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Prismatix.Geometry
 {
@@ -83,9 +84,20 @@ namespace Prismatix.Geometry
                     listOfAllTris.Add(tri);
                 }
 
-                if (obj.material.hasTexture){
-                    obj.material.textureOffset = textureAtlasArr.Count;
-                    textureAtlasArr.AddRange(obj.material.textureCoordsArray);
+                if (obj.material.albedoData != null)
+                {
+                    obj.material.albedoOffset = textureAtlasArr.Count;
+                    textureAtlasArr.AddRange(obj.material.albedoData);
+                }
+                if (obj.material.roughnessData != null)
+                {
+                    obj.material.roughnessOffset = textureAtlasArr.Count;
+                    textureAtlasArr.AddRange(obj.material.roughnessData);
+                }
+                if (obj.material.metallicData != null)
+                {
+                    obj.material.metallicOffset = textureAtlasArr.Count;
+                    textureAtlasArr.AddRange(obj.material.metallicData);
                 }
             }
             gpuTextureAtlas = textureAtlasArr.ToArray();
@@ -151,7 +163,9 @@ namespace Prismatix.Geometry
                         texA = tri.texA,
                         texB = tri.texB,
                         texC = tri.texC,
-                        textureOffset = tri.hostObj.material.hasTexture ? tri.hostObj.material.textureOffset : 0,
+                        albedoOffset = tri.hostObj.material.albedoOffset,
+                        roughnessOffset = tri.hostObj.material.roughnessOffset,
+                        metallicOffset = tri.hostObj.material.metallicOffset,
                         textureWidth = tri.hostObj.material.textureWidth,
                         textureHeight = tri.hostObj.material.textureHeight
                     });
@@ -320,38 +334,53 @@ namespace Prismatix.Geometry
         public float metallic;
 
         public bool hasTexture = false;
-        public int textureOffset = 0;
+        public int albedoOffset = -1, roughnessOffset = -1, metallicOffset = -1;
         public int textureWidth = 0;
         public int textureHeight = 0; //coords array has width and height for RGBA channel img
-        public ComputeSharp.Float4[] textureCoordsArray = new ComputeSharp.Float4[0];
+
+        public ComputeSharp.Float4[] albedoData;
+        public ComputeSharp.Float4[] roughnessData;
+        public ComputeSharp.Float4[] metallicData;
 
         public Material(string nam, Vector3 col, float spec, float ruf, float met = 0.0f)
         {
             name = nam; colour = col; specular = spec; roughness = ruf; metallic = met;
         }
 
-        public void LoadTexture(string path)
+        private ComputeSharp.Float4[] LoadMap(string path)
         {
+            if (!File.Exists(path)) return null;
             using (Stream stream = File.OpenRead(path))
             {
                 var image = StbImageSharp.ImageResultFloat.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
-                textureWidth = image.Width;
+                textureWidth = image.Width;  // Assumes all maps in the PBR set are identical size
                 textureHeight = image.Height;
-                textureCoordsArray = new ComputeSharp.Float4[textureWidth * textureHeight];
+                var data = new ComputeSharp.Float4[textureWidth * textureHeight];
 
-                //populate the array with RGBA vals (index times 4 plus int for R G B A)
                 for (int i = 0; i < textureWidth * textureHeight; i++)
-                {
-                    textureCoordsArray[i] = new ComputeSharp.Float4(
-                        image.Data[i * 4 + 0], //R
-                        image.Data[i * 4 + 1], //G
-                        image.Data[i * 4 + 2], //B
-                        image.Data[i * 4 + 3]);//A
-                }
+                    data[i] = new ComputeSharp.Float4(
+                        image.Data[i *4], 
+                        image.Data[i *4 +1], 
+                        image.Data[i *4 +2], 
+                        image.Data[i *4 +3]);
+                return data;
             }
-            hasTexture = true;
+        }
+
+        public void LoadPBRTexture(string path, string prefix)
+        {
+            string FindFile(string suffix)
+            {
+                var files = Directory.GetFiles(path, $"{prefix}_{suffix}.*");
+                return files.Length > 0 ? files[0] : "";
+            }
+
+            albedoData = LoadMap(FindFile("Albedo"));
+            roughnessData = LoadMap(FindFile("Roughness"));
+            metallicData = LoadMap(FindFile("Metallic"));
         }
     }
+    
 
     public static class MeshLib
     {
@@ -423,12 +452,12 @@ namespace Prismatix.Geometry
 
             if (meshCache.TryGetValue(fullPath, out Mesh cachedMesh))
             {
-                Console.WriteLine($"Reusing cached mesh for: {Path.GetFileName(filePath)}");
+                Console.WriteLine($"Reusing mesh: {Path.GetFileName(filePath)}");
                 mesh = cachedMesh;
             }
             else 
             {
-                Console.WriteLine($"Loading new mesh from disk: {Path.GetFileName(filePath)}");
+                Console.WriteLine($"Loading new mesh: {Path.GetFileName(filePath)}");
                 var result = LoadMeshFromDisk(fullPath, scale);
                 mesh = result.Item1;
                 meshName = result.Item2;

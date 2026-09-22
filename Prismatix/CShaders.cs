@@ -95,8 +95,10 @@ namespace Prismatix.Shaders
         public float3 colour;
         public float roughness;
         public float metallic;
-        public int textureOffset, 
-            textureWidth, 
+        public int albedoOffset,
+            roughnessOffset,
+            metallicOffset,
+            textureWidth,
             textureHeight;
     }
 
@@ -109,8 +111,11 @@ namespace Prismatix.Shaders
         public float2 tex;
         public float roughness;
         public float metallic;
-        public int textureOffset, 
-            textureWidth, 
+        public int albedoOffset,
+            roughnessOffset,
+            metallicOffset,
+            textureOffset,
+            textureWidth,
             textureHeight;
     }
 
@@ -287,6 +292,9 @@ namespace Prismatix.Shaders
                         }
 
                         float3 albedo = hit.colour;
+                        float roughness = hit.roughness;
+                        float metallic = hit.metallic;
+
                         if (hit.textureWidth > 0 && hit.textureHeight > 0)
                         {
                             //subtract floor to remove any integer value leave only decimal, wrap around
@@ -296,8 +304,16 @@ namespace Prismatix.Shaders
                             int px = (int)(u * (hit.textureWidth - 1));
                             int py = (int)(v * (hit.textureHeight - 1));
 
-                            int index = hit.textureOffset + (py * hit.textureWidth + px);
-                            albedo = textureAtlas[index].XYZ;
+                            int index = (py * hit.textureWidth + px);
+
+                            if (hit.albedoOffset != -1)
+                                albedo = textureAtlas[hit.albedoOffset + index].XYZ;
+
+                            //only need red channel since these are greyscale, any would do
+                            if (hit.roughnessOffset != -1)
+                                roughness = textureAtlas[hit.roughnessOffset + index].X;
+                            if (hit.metallicOffset != -1)
+                                metallic = textureAtlas[hit.metallicOffset + index].X;
                         }
 
                         //tally up the direct lighting from all lamps
@@ -330,12 +346,12 @@ namespace Prismatix.Shaders
                         float3 specularBounce = Hlsl.Lerp( //linear interp
                             Hlsl.Reflect(rayDir, hit.normal),
                             diffuse, 
-                            hit.roughness);
+                            roughness);
 
                         //determine whether ray is specular - metallic materials have higher chance of specular bounce
                         //splitting rays into diffuse and specular every bounce would be expensive,
                         //so we rely on monte-carlo mixing these together.
-                        bool isSpecular = RandomFloat(ref seed) < hit.metallic;
+                        bool isSpecular = RandomFloat(ref seed) < metallic;
 
                         //set values for next ray
                         rayOrigin = hit.point + hit.normal * 0.001f;
@@ -550,9 +566,13 @@ namespace Prismatix.Shaders
             hitInfo.distance = distance;
             hitInfo.point = rayOrigin + rayDir * distance;
             hitInfo.tex = tri.texA * (1 - baryB - baryC) + tri.texB * baryB + tri.texC * baryC;
-            hitInfo.textureOffset = tri.textureOffset;
+            hitInfo.albedoOffset = tri.albedoOffset;
+            hitInfo.roughnessOffset = tri.roughnessOffset;
+            hitInfo.metallicOffset = tri.metallicOffset;
             hitInfo.textureWidth = tri.textureWidth;
             hitInfo.textureHeight = tri.textureHeight;
+            hitInfo.roughness = tri.roughness;
+            hitInfo.metallic = tri.metallic;
             hitInfo.normal = Hlsl.Dot(rayDir, tri.normal) > 0 ? -tri.normal : tri.normal;
             hitInfo.colour = tri.colour;
         }

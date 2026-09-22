@@ -240,6 +240,7 @@ namespace Prismatix
                 cam.vpWidth = cam.vpHeight * (currentViewportSize.X / currentViewportSize.Y);
 
             cam.RotateTo(pivot);
+            needsRender = true;
         }
         private static void TakeCamInputs()
         {
@@ -904,18 +905,23 @@ namespace Prismatix
                 Material mat = selectedObj.material;
 
                 if (ImGui.Button("Load Texture", new Vector2(-1, 24)))
-                    ImGui.OpenPopup("LoadTexPopup");
+                    ImGui.OpenPopup("LoadPbrPopup");
 
-                if (ImGui.BeginPopup("LoadTexPopup"))
+                if (ImGui.BeginPopup("LoadPbrPopup"))
                 {
                     string texPath = Path.Combine(projectDirectory, "Textures");
                     if (Directory.Exists(texPath))
                     {
-                        foreach (string file in Directory.GetFiles(texPath, "*.*"))
+                        string[] albedoFiles = Directory.GetFiles(texPath, "*_Albedo.*");
+
+                        foreach (string file in albedoFiles)
                         {
-                            if (ImGui.Selectable(Path.GetFileName(file)))
+                            string fileName = Path.GetFileNameWithoutExtension(file);
+                            string prefix = fileName.Replace("_Albedo", "");
+
+                            if (ImGui.Selectable(prefix))
                             {
-                                selectedObj.material.LoadTexture(file);
+                                selectedObj.material.LoadPBRTexture(texPath, prefix);
                                 selectedObj.needsPrecomp = true;
                                 needsRender = true;
                             }
@@ -929,7 +935,6 @@ namespace Prismatix
                 {
                     mat.colour = new Math.Vector3(albedoColor.X, albedoColor.Y, albedoColor.Z);
                     selectedObj.needsPrecomp = true;
-                    currScene.BuildBVH();
                     needsRender = true;
                 }
                 float spec = mat.specular;
@@ -937,7 +942,6 @@ namespace Prismatix
                 {
                     mat.specular = spec;
                     selectedObj.needsPrecomp = true;
-                    currScene.BuildBVH();
                     needsRender = true;
                 }
                 float rough = mat.roughness;
@@ -945,7 +949,6 @@ namespace Prismatix
                 {
                     mat.roughness = rough;
                     selectedObj.needsPrecomp = true;
-                    currScene.BuildBVH();
                     needsRender = true;
                 }
                 float met = mat.metallic;
