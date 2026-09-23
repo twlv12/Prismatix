@@ -13,7 +13,9 @@ using System.Numerics;
 namespace Prismatix
 {
     //TODO:
-    //Fix selection of lamps in outliner
+    //add button to disable jarvis system
+    //add HDRI rotation
+    
 
     public class Interface
     {
