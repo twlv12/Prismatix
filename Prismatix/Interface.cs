@@ -15,7 +15,7 @@ namespace Prismatix
     //TODO:
     //add button to disable jarvis system
     //add HDRI rotation
-    
+    //controls for trackpack users
 
     public class Interface
     {
@@ -764,35 +764,72 @@ namespace Prismatix
             ImGui.Text("Outliner");
             ImGui.Separator();
 
-            if (ImGui.Button("Import .OBJ File", new Vector2(-1, 30)))
+            if (ImGui.Button("Add New Model", new Vector2(-1, 30)))
                 ImGui.OpenPopup("ImportModelPopup");
+
             if (ImGui.BeginPopup("ImportModelPopup"))
             {
-                ImGui.TextDisabled("Select a model");
+                ImGui.TextDisabled("Select a model or .group file");
                 ImGui.Separator();
 
                 string geoPath = Path.Combine(projectDirectory, "Geometry");
+                string texPath = Path.Combine(projectDirectory, "Textures");
+
                 if (Directory.Exists(geoPath))
                 {
-                    string[] objFiles = Directory.GetFiles(geoPath, "*.obj");
+                    var allFiles = Directory.GetFiles(geoPath, "*.*")
+                        .Where(f => f.EndsWith(".obj") || f.EndsWith(".group"))
+                        .ToList();
 
-                    if (objFiles.Length == 0)
+                    if (allFiles.Count == 0)
                         ImGui.TextDisabled("No models found.");
                     else
-                        foreach (string file in objFiles)
+                    {
+                        foreach (string file in allFiles)
                         {
+                            if (file.EndsWith("_Part.obj")) continue;
+
                             string fileName = Path.GetFileName(file);
                             if (ImGui.Selectable(fileName))
+                            {
                                 if (currScene != null)
                                 {
-                                    string objName = Path.GetFileNameWithoutExtension(file);
-                                    Geometry.Object newObj = MeshLib.NewObj(file, new Math.Vector3(0, 0, 0), objName, 1.0f);
-                                    newObj.material = new Material($"{objName} Material", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
+                                    if (file.EndsWith(".group"))
+                                    {
+                                        string[] partNames = File.ReadAllLines(file);
+                                        foreach (string partPrefix in partNames)
+                                        {
+                                            if (string.IsNullOrWhiteSpace(partPrefix)) continue;
 
-                                    currScene.AddObject(newObj);
-                                    currObjectIndex = currScene.objects.Count - 1;
+                                            string partObjPath = Path.Combine(geoPath, $"{partPrefix}.obj");
+                                            if (File.Exists(partObjPath))
+                                            {
+                                                Geometry.Object newObj = MeshLib.NewObj(partObjPath, new Math.Vector3(0, 0, 0), partPrefix, 1.0f);
+                                                newObj.material = new Material($"{partPrefix} Mat", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
+
+                                                newObj.material.LoadPBRTexture(texPath, partPrefix);
+                                                currScene.AddObject(newObj);
+                                            }
+                                        }
+                                        currScene.isOutdated = true;
+                                        needsRender = true;
+                                    }
+                                    else
+                                    {
+                                        string objName = Path.GetFileNameWithoutExtension(file);
+                                        Geometry.Object newObj = MeshLib.NewObj(file, new Math.Vector3(0, 0, 0), objName, 1.0f);
+                                        newObj.material = new Material($"{objName} Material", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
+
+                                        currScene.AddObject(newObj);
+                                        currObjectIndex = currScene.objects.Count - 1;
+
+                                        currScene.isOutdated = true;
+                                        needsRender = true;
+                                    }
                                 }
+                            }
                         }
+                    }
                 }
                 else ImGui.TextDisabled("Geometry folder not found.");
 

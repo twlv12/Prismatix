@@ -565,7 +565,7 @@ namespace Prismatix.Shaders
             hit = true;
             hitInfo.distance = distance;
             hitInfo.point = rayOrigin + rayDir * distance;
-            hitInfo.tex = tri.texA * (1 - baryB - baryC) + tri.texB * baryB + tri.texC * baryC;
+            hitInfo.tex = tri.texA * (1 - baryB - baryC) + tri.texB * baryC + tri.texC * baryB;
             hitInfo.albedoOffset = tri.albedoOffset;
             hitInfo.roughnessOffset = tri.roughnessOffset;
             hitInfo.metallicOffset = tri.metallicOffset;
