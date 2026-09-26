@@ -129,7 +129,7 @@ namespace Prismatix
                 renderMode, Config.maxSamples, Config.maxRayDepth, bgColour,
                 scene.mainCamera.position, scene.mainCamera.origin,
                 scene.mainCamera.horizontal, scene.mainCamera.vertical,
-                width, height, gpuHdri, scene.useHdri, (uint)Environment.TickCount, scene.hdriIntensity, gpuTexture
+                width, height, gpuHdri, scene.useHdri, (uint)Environment.TickCount, scene.hdriIntensity, gpuTexture, scene.hdriRotation
             );
 
             //GO GPU! and retrieve once done

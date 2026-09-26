@@ -22,6 +22,7 @@ namespace Prismatix.Geometry
         public int hdriHeight = 1;
         public float4[] hdriArray = { new float4(0, 0, 0, 1) };
         public float hdriIntensity = 1.0f;
+        public float hdriRotation = 0.0f;
 
         public ComputeSharp.Float4[] gpuTextureAtlas = 
             new ComputeSharp.Float4[] 
@@ -371,7 +372,7 @@ namespace Prismatix.Geometry
         {
             string FindFile(string suffix)
             {
-                var files = Directory.GetFiles(path, $"{prefix}_{suffix}.*");
+                var files = Directory.GetFiles(path, $"{prefix}_{suffix}.*", SearchOption.AllDirectories);
                 return files.Length > 0 ? files[0] : "";
             }
 

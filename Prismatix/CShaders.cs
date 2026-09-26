@@ -151,6 +151,7 @@ namespace Prismatix.Shaders
         public readonly ReadOnlyBuffer<float4> textureAtlas;
         public readonly bool useHdri;
         public readonly float hdriIntensity;
+        public readonly float hdriRotation;
 
         //GPU will not be able to access any c# obj data, so must pass in here now
         public readonly int renderMode; //0 depth, 1 normal, 2 diffuse, 3 traced
@@ -168,7 +169,8 @@ namespace Prismatix.Shaders
 
         public Shader (ReadOnlyBuffer<GPUNode> bvhNodes, ReadOnlyBuffer<GPUTriangle> triangles, ReadOnlyBuffer<GPULamp> lamps, ReadWriteTexture2D<uint> outputImage,
             int renderMode, int maxSamples, int maxRayDepth, float3 bgColour,
-            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity, ReadOnlyBuffer<float4> textureAtlas) 
+            float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity, ReadOnlyBuffer<float4> textureAtlas
+            ,float hdriRotation) 
         {
             this.bvhNodes = bvhNodes; this.triangles = triangles; this.lamps = lamps; this.outputImage = outputImage;
             this.renderMode = renderMode; this.maxSamples = maxSamples; this.maxRayDepth = maxRayDepth; this.bgColour = bgColour;
@@ -179,7 +181,7 @@ namespace Prismatix.Shaders
             this.useHdri = useHdri;
             this.frameSeed = frameSeed * 100;
             this.hdriIntensity = hdriIntensity;
-
+            this.hdriRotation = hdriRotation;
         }
 
         //the gpu cant use the default c# random lib,
@@ -227,8 +229,8 @@ namespace Prismatix.Shaders
                 NextRandom(ref seed);
 
                 //AA jitter ONLY if using traced mode
-                float jitterFactorX = (renderMode == 3) ? RandomFloat(ref seed) - 0.5f : 0f;
-                float jitterFactorY = (renderMode == 3) ? RandomFloat(ref seed) - 0.5f : 0f;
+                float jitterFactorX = (renderMode == 2) ? RandomFloat(ref seed) - 0.5f : 0f;
+                float jitterFactorY = (renderMode == 2) ? RandomFloat(ref seed) - 0.5f : 0f;
                 //absolute jitter ray origin coord
                 float jitterX = (x + jitterFactorX) / (width - 1f);
                 float jitterY = (y + jitterFactorY) / (height - 1f);
@@ -236,7 +238,7 @@ namespace Prismatix.Shaders
                 float3 pixelVector = camOrigin + (jitterX * camHorizontal) + (jitterY * camVertical);
                 float3 rayDir = Hlsl.Normalize(pixelVector - camPos);
                 float3 rayOrigin = camPos;
-                float3 invDir = 1.0f / rayDir;
+                float3 invDir = 1.0f / rayDir;  
                 //precomp invdir for faster bv bounds check
 
                 bool hasHit;
@@ -263,8 +265,6 @@ namespace Prismatix.Shaders
                     //lightColour is the colour of the ray
                     float3 lightColour = new float3(1, 1, 1);
 
-                    float3 linearBg = bgColour * bgColour;
-
                     for (int bounce = 0; bounce < maxRayDepth; bounce++)
                     {
                         TraverseBVH(rayOrigin, rayDir, invDir, out hasHit, out hit);
@@ -273,8 +273,14 @@ namespace Prismatix.Shaders
                         {
                             if (useHdri)
                             {
-                                float u = 0.5f + (Hlsl.Atan2(rayDir.Z, rayDir.X) / (2.0f * (float)SysMath.PI));
-                                float v = 0.5f - (Hlsl.Asin(rayDir.Y) / (float)SysMath.PI);
+                                float u = 0.5f 
+                                    + (Hlsl.Atan2(rayDir.Z, rayDir.X) 
+                                    / (2.0f * (float)SysMath.PI));
+
+                                u = Hlsl.Frac(u + hdriRotation);
+                                float v = 0.5f 
+                                    - (Hlsl.Asin(rayDir.Y) 
+                                    / (float)SysMath.PI);
 
                                 int texX = (int)(u * hdriTexture.Width);
                                 int texY = (int)(v * hdriTexture.Height);
@@ -286,7 +292,7 @@ namespace Prismatix.Shaders
                             }
                             else{
 
-                                currentLight += lightColour * linearBg;
+                                currentLight += lightColour * bgColour * bgColour;
                             }
                             break;
                         }
@@ -513,12 +519,12 @@ namespace Prismatix.Shaders
         private void GetRayHitsBounds(float3 rayOrigin, float3 invDir, float3 min, float3 max, out bool hit, out float hitDistance)
         {
             //two different times where the ray crosses the infinite box planes
-            float3 t1 = (min - rayOrigin) * invDir;
-            float3 t2 = (max - rayOrigin) * invDir;
+            float3 tEnter = (min - rayOrigin) * invDir;
+            float3 tExit = (max - rayOrigin) * invDir;
 
             //corners of box
-            float3 tMin = Hlsl.Min(t1, t2);
-            float3 tMax = Hlsl.Max(t1, t2);
+            float3 tMin = Hlsl.Min(tEnter, tExit);
+            float3 tMax = Hlsl.Max(tEnter, tExit);
 
             //tnear is the entry point, tfar is exit point
             float tNear = Hlsl.Max(Hlsl.Max(tMin.X, tMin.Y), tMin.Z);

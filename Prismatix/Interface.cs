@@ -6,6 +6,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -43,6 +44,7 @@ namespace Prismatix
 
         private static string[] hdriFiles = new string[0];
         private static int currHdriIndex = 0;
+        public static bool showGroupTextures = false;
 
         public enum Tool {None, Move, Rotate, Scale}
         private static Tool selectedTool = Tool.None;
@@ -56,6 +58,7 @@ namespace Prismatix
         private static double currDeltaTime = 0.0;
         private static bool showBvh = false;
         private static string activeAxis = "";
+        private static bool showJarvis = true;
 
         private static System.Threading.Tasks.Task<Image> renderTask = null;
         private static bool isRendering = false;
@@ -473,6 +476,8 @@ namespace Prismatix
         }
         private static void DrawJarvisSystem(ImDrawListPtr drawList, Vector2 vpMin, Vector2 vpSize)
         {
+            if (!showJarvis) return;
+
             if (currScene == null || currScene.mainCamera == null) return;
             Camera cam = currScene.mainCamera;
 
@@ -777,9 +782,18 @@ namespace Prismatix
 
                 if (Directory.Exists(geoPath))
                 {
-                    var allFiles = Directory.GetFiles(geoPath, "*.*")
+                    //scan absolutely everything in subfolders too!
+                    var allFiles = Directory.GetFiles(geoPath, "*.*", SearchOption.AllDirectories)
                         .Where(f => f.EndsWith(".obj") || f.EndsWith(".group"))
                         .ToList();
+
+                    //build a dynamic blacklist of parts to hide them from the ui
+                    HashSet<string> groupedParts = new HashSet<string>();
+                    foreach (var groupFile in allFiles.Where(f => f.EndsWith(".group")))
+                    {
+                        var lines = File.ReadAllLines(groupFile);
+                        foreach (var line in lines) groupedParts.Add(line.Trim());
+                    }
 
                     if (allFiles.Count == 0)
                         ImGui.TextDisabled("No models found.");
@@ -787,26 +801,36 @@ namespace Prismatix
                     {
                         foreach (string file in allFiles)
                         {
-                            if (file.EndsWith("_Part.obj")) continue;
-
                             string fileName = Path.GetFileName(file);
-                            if (ImGui.Selectable(fileName))
+                            string nameNoExt = Path.GetFileNameWithoutExtension(file);
+
+                            //skip rendering out any _Part objs or anything tracked in a .group
+                            if (file.EndsWith(".obj") && (fileName.Contains("_Part.obj") || groupedParts.Contains(nameNoExt)))
+                                continue;
+
+                            //clean up the file path for display so we can see which folder its in
+                            string displayPath = Path.GetRelativePath(geoPath, file);
+
+                            if (ImGui.Selectable(displayPath))
                             {
                                 if (currScene != null)
                                 {
                                     if (file.EndsWith(".group"))
                                     {
+                                        //make sure we grab the parts from the same subfolder the group was in
+                                        string groupDir = Path.GetDirectoryName(file);
                                         string[] partNames = File.ReadAllLines(file);
                                         foreach (string partPrefix in partNames)
                                         {
                                             if (string.IsNullOrWhiteSpace(partPrefix)) continue;
 
-                                            string partObjPath = Path.Combine(geoPath, $"{partPrefix}.obj");
+                                            string partObjPath = Path.Combine(groupDir, $"{partPrefix}.obj");
                                             if (File.Exists(partObjPath))
                                             {
                                                 Geometry.Object newObj = MeshLib.NewObj(partObjPath, new Math.Vector3(0, 0, 0), partPrefix, 1.0f);
                                                 newObj.material = new Material($"{partPrefix} Mat", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
 
+                                                //auto attach all the fancy pbr maps
                                                 newObj.material.LoadPBRTexture(texPath, partPrefix);
                                                 currScene.AddObject(newObj);
                                             }
@@ -816,13 +840,11 @@ namespace Prismatix
                                     }
                                     else
                                     {
-                                        string objName = Path.GetFileNameWithoutExtension(file);
-                                        Geometry.Object newObj = MeshLib.NewObj(file, new Math.Vector3(0, 0, 0), objName, 1.0f);
-                                        newObj.material = new Material($"{objName} Material", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
-
+                                        //standard single mesh load for things like the default cube
+                                        Geometry.Object newObj = MeshLib.NewObj(file, new Math.Vector3(0, 0, 0), nameNoExt, 1.0f);
+                                        newObj.material = new Material($"{nameNoExt} Material", new Math.Vector3(0.8f, 0.8f, 0.8f), 0.5f, 0.5f);
                                         currScene.AddObject(newObj);
                                         currObjectIndex = currScene.objects.Count - 1;
-
                                         currScene.isOutdated = true;
                                         needsRender = true;
                                     }
@@ -841,15 +863,15 @@ namespace Prismatix
             {
                 if (currScene != null)
                 {
-                    // Spawn the lamp slightly above the origin
+                    //spawn the lamp slightly above the origin
                     currScene.AddLamp(new Lamp(new Math.Vector3(0, 2.0f, 0), 50.0f));
 
-                    // Automatically select it!
+                    //automatically select it!
                     currSelection = (int)SelectionType.Lamp;
                     currLampIndex = currScene.lamps.Count - 1;
                     currObjectIndex = -1;
 
-                    // Alert the GPU
+                    //alert the gpu
                     currScene.isOutdated = true;
                 }
             }
@@ -864,7 +886,7 @@ namespace Prismatix
                     if (ImGui.Checkbox($"##objVis{i}", ref vis))
                     {
                         currScene.objects[i].isVisible = vis;
-                        currScene.isOutdated = true; //rebuild 
+                        currScene.isOutdated = true; //rebuild bvh and texture atlas
                     }
                     ImGui.SameLine();
 
@@ -912,7 +934,7 @@ namespace Prismatix
 
             if (currTextureId != 0)
             {
-                // flip the image to match backend renderer
+                //flip the image to match backend renderer
                 ImGui.Image((IntPtr)currTextureId, currentViewportSize, new Vector2(0, 1), new Vector2(1, 0));
 
                 ImDrawListPtr drawList = ImGui.GetWindowDrawList();
@@ -948,18 +970,32 @@ namespace Prismatix
 
                 if (ImGui.BeginPopup("LoadPbrPopup"))
                 {
+                    //toggle ui clutter 
+                    ImGui.Checkbox("Show grouped/folder textures", ref showGroupTextures);
+                    ImGui.Separator();
+
                     string texPath = Path.Combine(projectDirectory, "Textures");
                     if (Directory.Exists(texPath))
                     {
-                        string[] albedoFiles = Directory.GetFiles(texPath, "*_Albedo.*");
+                        //toggle deep scanning based on the checkbox
+                        SearchOption searchOpt = showGroupTextures ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
+                        var albedoFiles = Directory.GetFiles(texPath, "*_Albedo.*", searchOpt).ToList();
 
                         foreach (string file in albedoFiles)
                         {
-                            string fileName = Path.GetFileNameWithoutExtension(file);
-                            string prefix = fileName.Replace("_Albedo", "");
+                            string fileName = Path.GetFileName(file);
 
-                            if (ImGui.Selectable(prefix))
+                            //hide automated parts if the box is unchecked to save space
+                            if (!showGroupTextures && fileName.Contains("_Part_")) continue;
+
+                            string displayPath = Path.GetRelativePath(texPath, file);
+                            string fileNameNoExt = Path.GetFileNameWithoutExtension(file);
+                            string prefix = fileNameNoExt.Replace("_Albedo", "");
+
+                            if (ImGui.Selectable(displayPath))
                             {
+                                //trigger material update and push changes
                                 selectedObj.material.LoadPBRTexture(texPath, prefix);
                                 selectedObj.needsPrecomp = true;
                                 needsRender = true;
@@ -1013,7 +1049,7 @@ namespace Prismatix
                 Lamp selLamp = currScene.lamps[currLampIndex];
 
                 float bright = selLamp.brightness;
-                if (ImGui.DragFloat("Brightness", ref bright, 0.5f, 0.0f, 1000.0f)) 
+                if (ImGui.DragFloat("Brightness", ref bright, 0.5f, 0.0f, 1000.0f))
                 {
                     selLamp.brightness = bright;
                     currScene.isOutdated = true;
@@ -1067,6 +1103,10 @@ namespace Prismatix
                     }
                 }
 
+                //added hdri rotation slider, mapped 0 to 1 for 360 deg spin
+                if (ImGui.SliderFloat("HDRI Rotation", ref currScene.hdriRotation, 0.0f, 1.0f))
+                    currScene.isOutdated = true;
+
                 if (ImGui.SliderFloat("HDRI Intensity", ref currScene.hdriIntensity, 0.0f, 10.0f))
                     currScene.isOutdated = true;
 
@@ -1103,11 +1143,13 @@ namespace Prismatix
             int depth = Config.maxRayDepth;
 
             //dragint better scaling
-            if (ImGui.DragInt("Max Samples", ref samples, 1f, 1, 256)) { 
+            if (ImGui.DragInt("Max Samples", ref samples, 1f, 1, 256))
+            {
                 Config.maxSamples = samples;
                 needsRender = true;
             }
-            if (ImGui.DragInt("Ray Depth", ref depth, 0.1f, 1, 16)) { 
+            if (ImGui.DragInt("Ray Depth", ref depth, 0.1f, 1, 16))
+            {
                 Config.maxRayDepth = depth;
                 needsRender = true;
             }
@@ -1134,6 +1176,11 @@ namespace Prismatix
             RenderModeBtn("Normal", 1);
             RenderModeBtn("Diffuse", 3);
             RenderModeBtn("Traced", 2);
+
+            ImGui.SameLine();
+
+            //toggle for jarvis grid
+            ImGui.Checkbox("Show Gizmos", ref showJarvis);
 
             ImGui.SameLine();
 
