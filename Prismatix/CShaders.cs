@@ -95,6 +95,7 @@ namespace Prismatix.Shaders
         public float3 colour;
         public float roughness;
         public float metallic;
+        public float specular;
         public int albedoOffset,
             roughnessOffset,
             metallicOffset,
@@ -111,6 +112,7 @@ namespace Prismatix.Shaders
         public float2 tex;
         public float roughness;
         public float metallic;
+        public float specular;
         public int albedoOffset,
             roughnessOffset,
             metallicOffset,
@@ -349,24 +351,30 @@ namespace Prismatix.Shaders
                         currentLight += lightColour * directLight;
 
                         float3 diffuse = Hlsl.Normalize(hit.normal + RandomVector(ref seed));
+                        float3 reflect = Hlsl.Reflect(rayDir, hit.normal);
 
                         //blend between a completely random vector and total reflection baseed on roughness
                         float3 specularBounce = Hlsl.Lerp( //linear interp
-                            Hlsl.Reflect(rayDir, hit.normal),
+                            reflect,
                             diffuse, 
                             roughness);
 
                         //determine whether ray is specular - metallic materials have higher chance of specular bounce
                         //splitting rays into diffuse and specular every bounce would be expensive,
                         //so we rely on monte-carlo mixing these together.
-                        bool isSpecular = RandomFloat(ref seed) < metallic;
+                        bool isSpecular = RandomFloat(ref seed) < Hlsl.Lerp(hit.specular, 1.0f, hit.metallic);
 
                         //set values for next ray
                         rayOrigin = hit.point + hit.normal * 0.001f;
                         rayDir = isSpecular ? specularBounce : diffuse;
                         invDir = 1.0f / rayDir;
 
-                        lightColour *= albedo;
+                        //non metals specular is white, while metals specular is tinted by albedo
+                        //difuse is always tinted by albedo
+                        if (isSpecular)
+                            lightColour *= Hlsl.Lerp(new float3(1, 1, 1), albedo, hit.metallic);
+                        else
+                            lightColour *= albedo;
                     }
 
                     totalColour += currentLight;
@@ -581,6 +589,7 @@ namespace Prismatix.Shaders
             hitInfo.textureHeight = tri.textureHeight;
             hitInfo.roughness = tri.roughness;
             hitInfo.metallic = tri.metallic;
+            hitInfo.specular = tri.specular;
             hitInfo.normal = Hlsl.Dot(rayDir, tri.normal) > 0 ? -tri.normal : tri.normal;
             hitInfo.colour = tri.colour;
         }
