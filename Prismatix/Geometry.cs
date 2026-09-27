@@ -17,6 +17,7 @@ namespace Prismatix.Geometry
         public bool isOutdated = true;
 
         public bool useHdri = false;
+        public bool clampHdri = false;
         public bool hdriOutdated = true;
         public int hdriWidth = 1;
         public int hdriHeight = 1;

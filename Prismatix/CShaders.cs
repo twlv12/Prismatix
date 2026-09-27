@@ -150,6 +150,7 @@ namespace Prismatix.Shaders
         public readonly ReadOnlyTexture2D<float4> hdriTexture;
         public readonly ReadOnlyBuffer<float4> textureAtlas;
         public readonly bool useHdri;
+        public readonly bool clampHdri;
         public readonly float hdriIntensity;
         public readonly float hdriRotation;
 
@@ -170,7 +171,7 @@ namespace Prismatix.Shaders
         public Shader (ReadOnlyBuffer<GPUNode> bvhNodes, ReadOnlyBuffer<GPUTriangle> triangles, ReadOnlyBuffer<GPULamp> lamps, ReadWriteTexture2D<uint> outputImage,
             int renderMode, int maxSamples, int maxRayDepth, float3 bgColour,
             float3 camPos, float3 camOrigin, float3 camHorizontal, float3 camVertical, float width, float height, ReadOnlyTexture2D<float4> hdriTexture, bool useHdri, uint frameSeed, float hdriIntensity, ReadOnlyBuffer<float4> textureAtlas
-            ,float hdriRotation) 
+            ,float hdriRotation, bool clampHdri) 
         {
             this.bvhNodes = bvhNodes; this.triangles = triangles; this.lamps = lamps; this.outputImage = outputImage;
             this.renderMode = renderMode; this.maxSamples = maxSamples; this.maxRayDepth = maxRayDepth; this.bgColour = bgColour;
@@ -182,6 +183,7 @@ namespace Prismatix.Shaders
             this.frameSeed = frameSeed * 100;
             this.hdriIntensity = hdriIntensity;
             this.hdriRotation = hdriRotation;
+            this.clampHdri = clampHdri;
         }
 
         //the gpu cant use the default c# random lib,
@@ -287,7 +289,7 @@ namespace Prismatix.Shaders
 
                                 float3 skyColor = hdriTexture[new int2(texX, texY)].XYZ;
                                 skyColor *= hdriIntensity;
-                                skyColor = Hlsl.Clamp(skyColor, 0.0f, 10.0f);
+                                if (clampHdri) skyColor = Hlsl.Clamp(skyColor, 0.0f, 10.0f);
                                 currentLight += lightColour * skyColor;
                             }
                             else{

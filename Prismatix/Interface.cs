@@ -161,7 +161,6 @@ namespace Prismatix
             guiController?.Dispose();
             window?.Dispose();
         }
-
         private static void OnUpdate(double deltaTime)
         {
         }
@@ -229,7 +228,6 @@ namespace Prismatix
             BuildUI();
             guiController.Render();
         }
-
         private static void UpdateCamPos(Camera cam)
         {
             ///now instead use spherical coords rather than a pivot, pitch and orbit
@@ -485,17 +483,17 @@ namespace Prismatix
             bool WorldToScreen(Math.Vector3 worldPos, out Vector2 screenPos, out float z)
             {
                 screenPos = new Vector2(0, 0);
-                Math.Vector3 vector = new Math.Vector3(
+                Math.Vector3 camRelVector = new Math.Vector3(
                     worldPos.x - cam.position.x,
                     worldPos.y - cam.position.y,
                     worldPos.z - cam.position.z);
 
-                z = Math.Utils.Dot(vector, cam.forward);
+                z = Math.Utils.Dot(camRelVector, cam.forward);
                 //skip infinite
                 if (z <= 0.001f) return false;
 
-                float screenX = Math.Utils.Dot(vector, cam.right) / z;
-                float screenY = Math.Utils.Dot(vector, cam.up) / z;
+                float screenX = Math.Utils.Dot(camRelVector, cam.right) / z;
+                float screenY = Math.Utils.Dot(camRelVector, cam.up) / z;
 
                 screenPos.X = vpMin.X + vpSize.X * (0.5f + screenX / cam.vpWidth);
                 screenPos.Y = vpMin.Y + vpSize.Y * (0.5f - screenY / cam.vpHeight);
@@ -1102,6 +1100,9 @@ namespace Prismatix
                         currScene.SetHDRI(hdriFiles[0]);
                     }
                 }
+                bool isHdriClamped = currScene.clampHdri;
+                if (ImGui.Checkbox("Clamp Brightness (Reduce Noise)", ref isHdriClamped))
+                    currScene.clampHdri = isHdriClamped;
 
                 //added hdri rotation slider, mapped 0 to 1 for 360 deg spin
                 if (ImGui.SliderFloat("HDRI Rotation", ref currScene.hdriRotation, 0.0f, 1.0f))
